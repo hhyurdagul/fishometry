@@ -1,5 +1,12 @@
 # Fish Depth
 
+## Table of Contents
+
+- [Yolo Image Detection](#yolo-image-detection)
+- [Depth Estimation](#depth-estimation)
+- [Length Prediction](#length-prediction)
+
+
 ## Yolo Image Detection
 
 ### Train
@@ -23,7 +30,7 @@
     - data/yolo_output/image_features_before_rotation.csv
     - data/yolo_output/rotated_images
     - data/yolo_output/image_features_after_rotation.csv
-    - data/depth/depth_input
+    - data/depth/depth_input_images
     - data/fish_data_after_yolo.csv
 
 1. On the non-labeled photos, run inference on the YOLOv11m model.
@@ -32,18 +39,42 @@
     - Rotate images from data/yolo_input/raw_images_for_yolo_to_predict and save to data/yolo_output/rotated_images
 3. Re-Run inference on the rotated images using the YOLOv11m model.
     - Get the detected features and save to data/yolo_output/image_features_after_rotation.csv
-    - Copy the contents to data/depth/depth_input
-    - Merge features with raw_fish_data.csv and save to fish_data_after_yolo.csv
-
+    - Features
+        - image_width, image_height
+        - head_x1, head_y1, head_x2, head_y2
+        - tail_x1, tail_y1, tail_x2, tail_y2
+        - fish_x1, fish_y1, fish_x2, fish_y2
+        - head_center_x, head_center_y, tail_center_x, tail_center_y, fish_center_x, fish_center_y
+        - fish_width, fish_height, fish_width_scaled, fish_height_scaled
+4. Copy the contents for depth estimation.
+    - Copy data/yolo_output/image_features_after_rotation.csv to data/fish_data_after_yolo.csv
+    - Copy data/yolo_output/rotated_images to data/depth/depth_input_images
 
 ## Depth Estimation
 
-Input: data/raw_fish_data.csv, data/depth/depth_input
+- Inputs
+    - data/fish_data_after_yolo.csv
+    - data/depth/depth_input_images
+- Outputs
+    - data/depth/depth_output_images
+    - data/fish_data_after_depth.csv
 
 1. Run depth estimation on the raw data.
     - Save the contents to data/depth/depth_output
 2. Get features from detected depth of the images.
+    - Merge it with data/fish_data_after_yolo.csv and save to data/fish_data_after_depth.csv
     - Features
-        - Depth_Head, Depth_Tail, Depth_Center
-        - 
-    - Merge it with raw_data and save to fish_output.csv
+        - Depth_head, Depth_tail, Depth_fish
+
+
+## Length Prediction
+
+- Inputs
+    - data/fish_data_after_depth.csv
+- Outputs
+    - data/fish_data_after_length.csv
+
+1. Run length prediction on the raw data.
+    - Read the data from data/fish_data_after_depth.csv
+    - Create Linear Regression model and predict the length
+    - Save the contents to data/fish_data_after_length.csv
