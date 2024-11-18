@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "gradio>=5.6.0",
+    "hub-sdk>=0.0.15",
     "matplotlib>=3.9.2",
     "opencv-python>=4.10.0.84",
     "timm>=1.0.11",

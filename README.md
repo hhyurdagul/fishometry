@@ -7,6 +7,16 @@
 - [Length Prediction](#length-prediction)
 
 
+## Preparation
+
+- Inputs
+    - data/images
+- Outputs
+    - data/yolo_input/raw_images_for_yolo_to_train
+- Code
+    - scripts/select_images_for_yolo_gradio.py
+    - scripts/preprocess_yolo_input.py
+
 ## Yolo Image Detection
 
 ### Train
@@ -15,6 +25,8 @@
     - data/yolo_input/raw_images_for_yolo_to_train
 - Outputs
     - models/yolov11m-v0.py
+- Code
+    - scripts/yolo.py
 
 1. From raw photos pick different types of fish and copy to new folder.
 2. Create train set by reordering the class numbers in label files.

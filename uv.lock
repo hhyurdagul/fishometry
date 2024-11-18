@@ -331,6 +331,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "gradio" },
+    { name = "hub-sdk" },
     { name = "matplotlib" },
     { name = "opencv-python" },
     { name = "timm" },
@@ -342,6 +343,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "gradio", specifier = ">=5.6.0" },
+    { name = "hub-sdk", specifier = ">=0.0.15" },
     { name = "matplotlib", specifier = ">=3.9.2" },
     { name = "opencv-python", specifier = ">=4.10.0.84" },
     { name = "timm", specifier = ">=1.0.11" },
@@ -491,6 +493,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/78/82/08f8c936781f67d9e6b9eeb8a0c8b4e406136ea4c3d1f89a5db71d42e0e6/httpx-0.27.2.tar.gz", hash = "sha256:f7c2be1d2f3c3c3160d441802406b206c2b76f5947b11115e6df10c6c65e66c2", size = 144189 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/95/9377bcb415797e44274b51d46e3249eba641711cf3348050f76ee7b15ffc/httpx-0.27.2-py3-none-any.whl", hash = "sha256:7bb2708e112d8fdd7829cd4243970f0c223274051cb35ee80c03301ee29a3df0", size = 76395 },
+]
+
+[[package]]
+name = "hub-sdk"
+version = "0.0.15"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cc/6f/493ded3554df48f90251eedcfee04a2075e0310f2b8baa28a19c90c55f8e/hub_sdk-0.0.15.tar.gz", hash = "sha256:bf9fceb3a35982b931085eb637911d48c2709e6c012c0bc8b9d1b48d82352a3f", size = 37649 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/4e/05e2dd8166ee4d96999d4f81fd40866e55a2562b27a35ca2eef3d84aafa5/hub_sdk-0.0.15-py3-none-any.whl", hash = "sha256:4c46f5de32646d23741f4df841c94a22be4128222f69316652e62512b205adca", size = 42517 },
 ]
 
 [[package]]
