@@ -4,8 +4,10 @@ from glob import glob
 import cv2
 
 index = -1
+root_image_dir = "data/images"
+removed_image_dir = "data/images/Removed"
 # Get all images in all directories if the directory is not Removed
-images_list = [i for i in glob("data/images/*/*.jpg") if i.split("/")[2] != "Removed"]
+images_list = [i for i in glob(f"{root_image_dir}/*/*.jpg") if i.split("/")[2] != "Removed"]
 
 def load_image(image_path):
     image = cv2.imread(image_path)
@@ -34,12 +36,22 @@ def next_image():
 
 def delete_image():
     global index
-    image_name = images_list[index]
-    image_path = "/".join(image_name.split("/")[-2:])
-    old_root_dir = "/".join(image_name.split("/")[:-2])
-    new_root_dir = old_root_dir + "/Removed"
-    os.rename(image_name, os.path.join(new_root_dir, image_path))
-    os.rename(image_name[:-4] + ".txt", os.path.join(new_root_dir, image_path[:-4] + ".txt"))
+    image_path = images_list[index]
+    image_name = image_path.split("/")[-1]
+
+    txt_path = image_path[:-4] + ".txt"
+    txt_name = image_name[:-4] + ".txt"
+
+    sub_image_dir = image_path.split("/")[-2]
+
+    new_image_path = os.path.join(removed_image_dir, sub_image_dir, image_name)
+    new_txt_path = os.path.join(removed_image_dir, sub_image_dir, txt_name)
+
+    os.rename(image_path, new_image_path)
+    os.rename(txt_path, new_txt_path)
+
+    print(f"Image moved from {image_path} to {new_image_path}")
+
     index = increase_index(index)
     return load_image(images_list[index]), images_list[index], get_index_label(index)
 

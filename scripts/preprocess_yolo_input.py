@@ -7,13 +7,14 @@ import random
 random.seed(0)
 
 class_map = {
-    "0": "0", # Head
-    "1": "1", # Tail
-    "7": "2", # Salmon
-    "22": "3", # Pike
-    "27": "4", # Rudd
-    "30": "5", # Sea_trout
+    "0": "0",  # Head
+    "1": "1",  # Tail
+    "7": "2",  # Salmon
+    "22": "3",  # Pike
+    "27": "4",  # Rudd
+    "30": "5",  # Sea_trout
 }
+
 
 def is_val():
     return random.random() <= 0.1
@@ -28,10 +29,12 @@ def zipdir(path, ziph):
                 os.path.relpath(os.path.join(root, file), os.path.join(path, "..")),
             )
 
+
 def check_dataset(path):
     from ultralytics.hub import check_dataset
 
     check_dataset(path, task="detect")
+
 
 root_images_dir = "data/images"
 root_yolo_input_dir = "data/yolo_input"
@@ -59,9 +62,7 @@ def create_folders():
 
 
 def create_yaml_file():
-    with open(root_images_dir + "/classes.txt", "r") as f_in, open(
-        root_yolo_data_dir + "/raw_images_for_yolo_to_train.yaml", "w"
-    ) as f_out:
+    with open(root_yolo_data_dir + "/raw_images_for_yolo_to_train.yaml", "w") as f_out:
         data = {
             "train": "images/train",
             "val": "images/val",
@@ -72,7 +73,7 @@ def create_yaml_file():
                 3: "Pike",
                 4: "Rudd",
                 5: "Sea_trout",
-            }
+            },
         }
         yaml.dump(data, f_out)
 
@@ -100,20 +101,23 @@ def copy_images_and_labels(images, labels):
     for image, label in zip(images, labels):
         try:
             if is_val():
-                with open(label, "r") as f, open(root_yolo_data_dir + "/labels/val/" + os.path.basename(label), "w") as f_out:
+                with open(label, "r") as f, open(
+                    root_yolo_data_dir + "/labels/val/" + os.path.basename(label), "w"
+                ) as f_out:
                     for line in f.readlines():
                         class_id, x, y, w, h = line.split()
                         f_out.write(f"{class_map[class_id]} {x} {y} {w} {h}\n")
                 shutil.copy(image, root_yolo_data_dir + "/images/val")
             else:
-                with open(label, "r") as f, open(root_yolo_data_dir + "/labels/train/" + os.path.basename(label), "w") as f_out:
+                with open(label, "r") as f, open(
+                    root_yolo_data_dir + "/labels/train/" + os.path.basename(label), "w"
+                ) as f_out:
                     for line in f.readlines():
                         class_id, x, y, w, h = line.split()
                         f_out.write(f"{class_map[class_id]} {x} {y} {w} {h}\n")
                 shutil.copy(image, root_yolo_data_dir + "/images/train")
         except Exception as e:
             print(f"Error processing {image}: {str(e)}")
-            
 
 
 def main():
@@ -126,7 +130,7 @@ def main():
 
     with zipfile.ZipFile(root_yolo_input_dir + "/yolo_fish_data.zip", "w") as zipf:
         zipdir(root_yolo_data_dir, zipf)
-    
+
     check_dataset(root_yolo_input_dir + "/yolo_fish_data.zip")
 
 

@@ -14,7 +14,7 @@
 - Outputs
     - data/yolo_input/raw_images_for_yolo_to_train
 - Code
-    - scripts/select_images_for_yolo_gradio.py
+    - scripts/select_images_for_yolo_train_gradio.py
     - scripts/preprocess_yolo_input.py
 
 ## Yolo Image Detection
@@ -24,7 +24,7 @@
 - Inputs
     - data/yolo_input/raw_images_for_yolo_to_train
 - Outputs
-    - models/yolov11m-v0.py
+    - models/yolov11m-fish_model.pt
 - Code
     - scripts/yolo.py
 
@@ -39,6 +39,7 @@
     - data/yolo_input/raw_images_for_yolo_to_predict
     - data/raw_fish_data.csv
 - Outputs
+    - data/images_removed_from_yolo_predict
     - data/yolo_output/image_features_before_rotation.csv
     - data/yolo_output/rotated_images
     - data/yolo_output/image_features_after_rotation.csv

@@ -1,5 +1,6 @@
 from ultralytics import YOLO, checks, hub
 
+model = YOLO("models/yolov11m-fish_model.pt")
 
 def train_yolo():
     checks()
@@ -11,5 +12,16 @@ def train_yolo():
     return results
 
 
+def get_result_per_image(path):
+    # Run inference
+    results = model(path)
+
+    # Print image.jpg results in JSON format
+    print(results[0].to_json())
+    
+
+
 if __name__ == '__main__':
-    train_yolo()
+    # train_yolo()
+
+    get_result_per_image()
