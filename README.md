@@ -13,6 +13,8 @@
     - data/images
 - Outputs
     - data/yolo_input/raw_images_for_yolo_to_train
+    - data/yolo_input/raw_images_for_yolo_to_predict
+    - data/yolo_input/images_removed_from_yolo_predict
 - Code
     - scripts/select_images_for_yolo_train_gradio.py
     - scripts/preprocess_yolo_input.py
@@ -37,14 +39,13 @@
 
 - Inputs
     - data/yolo_input/raw_images_for_yolo_to_predict
-    - data/raw_fish_data.csv
 - Outputs
-    - data/images_removed_from_yolo_predict
     - data/yolo_output/image_features_before_rotation.csv
     - data/yolo_output/rotated_images
     - data/yolo_output/image_features_after_rotation.csv
-    - data/depth/depth_input_images
-    - data/fish_data_after_yolo.csv
+- Code
+    - scripts/yolo.py
+    - scripts/rotate.py
 
 1. On the non-labeled photos, run inference on the YOLOv11m model.
     - Get the detected features and save to data/yolo_output/image_features_before_rotation.csv
@@ -66,8 +67,9 @@
 ## Depth Estimation
 
 - Inputs
-    - data/fish_data_after_yolo.csv
-    - data/depth/depth_input_images
+    - data/raw_fish_data.csv
+    - data/yolo_output/image_features_after_rotation.csv
+    - data/yolo_output/rotated_images
 - Outputs
     - data/depth/depth_output_images
     - data/fish_data_after_depth.csv

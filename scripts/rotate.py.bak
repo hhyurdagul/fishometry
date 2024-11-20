@@ -1,7 +1,6 @@
 import os
 import cv2
 import math
-import pandas as pd
 
 def read_image(image_path):
     """
@@ -126,51 +125,68 @@ def calculate_angle(X, Y, Head_X, Head_Y, Tail_X, Tail_Y):
 
     return angle_radian
 
-root_image_dir = "data/yolo_input/raw_images_for_yolo_to_predict"
-output_image_dir = "data/yolo_output/rotated_images"
 
-def process_row(row):
-    image_name = row['name']
-    image_path = os.path.join(root_image_dir, image_name)
+def read_labels(txt_path):
+    with open(txt_path) as file:
+        for line in file:
+            s = line.strip().split()
+            if s[0] == '0':
+                X0 = (float(s[1]))
+                Y0 = (float(s[2]))
+            elif s[0] == '1':
+                X1 = (float(s[1]))
+                Y1 = (float(s[2]))
+    return X0,Y0,X1,Y1
 
-    x_0, y_0, x_1, y_1 = row["head_x_center"], row["head_y_center"], row["tail_x_center"], row["tail_y_center"]
-    image_width, image_height = row["image_width"], row["image_height"]
+images_directory_path = "C:/Users/Ayaz/Desktop/Fish-Rotator/images"
+image_names = os.listdir(images_directory_path)
+
+labels_directory_path = "C:/Users/Ayaz/Desktop/Fish-Rotator/labels"
+label_names = os.listdir(labels_directory_path)
+
+output_folder_path = "C:/Users/Ayaz/Desktop/Fish-Rotator/output"
+images_and_labels = tuple(zip(image_names, label_names))
+
+for image_name in image_names:
+    image_path = os.path.join(images_directory_path, image_name)
+    label_name,_ = os.path.splitext(image_name)
+    label_name = label_name + '.txt'
+
+    label_path = os.path.join(labels_directory_path, label_name)
+
 
     image = read_image(image_path)
+    X0, Y0, X1, Y1 = read_labels(label_path)
 
-    radian = calculate_angle(image_height, image_width, x_0, y_0, x_1, y_1)
+    width,height, _ = image.shape
+    print(height,width,image_name)
+    radian = calculate_angle(height, width, X0, Y0, X1, Y1)
     angle = radian_to_degree(radian)
 
     print(f"Processing: Image '{image_name}' with angle {angle} degrees")
 
-    if x_0 - x_1 > 0 and y_0 - y_1 < 0:
+    if X0 - X1 > 0 and Y0 - Y1 < 0:
         angle = -angle
         print("Region 1: Rotating")
         rotated_image = rotate_image(angle, image)
         image = rotated_image
-    elif x_0 - x_1 <= 0 and y_0 - y_1 <= 0:
+    elif X0 - X1 <= 0 and Y0 - Y1 <= 0:
         angle = angle
         print("Region 2: Rotating and Mirroring")
         rotated_image = rotate_image(angle, image)
         mirrored_image = mirror(rotated_image)
         image = mirrored_image
-    elif x_0 - x_1 <= 0 and y_0 - y_1 >= 0:
+    elif X0 - X1 <= 0 and Y0 - Y1 >= 0:
         angle = -angle
         print("Region 3: Rotating and Mirroring")
         rotated_image = rotate_image(angle, image)
         mirrored_image = mirror(rotated_image)
         image = mirrored_image
-    elif x_0 - x_1 > 0 and y_0 - y_1 > 0:
+    elif X0 - X1 > 0 and Y0 - Y1 > 0:
         angle = angle
         print('Region 4: Rotating')
         rotated_image = rotate_image(angle, image)
         image = rotated_image
 
-    output_image_path = os.path.join(output_image_dir, image_name)
+    output_image_path = os.path.join(output_folder_path, image_name)
     cv2.imwrite(output_image_path, image)
-
-
-
-if __name__ == "__main__":
-    df = pd.read_csv("data/yolo_output/image_features_before_rotation.csv")
-    df.apply(process_row, axis=1)
