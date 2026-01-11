@@ -1,0 +1,15 @@
+dataset_name: "data-outside"
+paths:
+  raw: "data/data-outside/raw"
+  output: "data/data-outside/processed"
+  in_data: "data/data-outside/raw.csv"
+  out_data: "data/data-outside/processed.csv"
+models:
+  yolo: "checkpoints/yolov11m-all_fish_model.pt"
+  sam: "checkpoints/sam.pth"
+  depth_repo: "third_party/Depth-Anything-3"
+  depth_v2_repo: "third_party/Depth-Anything-V2"
+  depth_pro_repo: "third_party/ml-depth-pro"
+params:
+  yolo_conf: 0.8
+  device: "cuda"
