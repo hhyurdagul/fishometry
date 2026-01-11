@@ -1,7 +1,7 @@
 [project]
 name = "fishometry"
 version = "0.1.0"
-description = "Add your description here"
+description = "Predicting fish length without any reference point"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

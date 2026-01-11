@@ -1,3 +1,12 @@
+"""
+CNN Training
+
+Trains a ResNet-based CNN with optional auxiliary features.
+
+Usage:
+    python -m src.training.cnn --dataset data-inside --feature-set coords --epochs 100
+"""
+
 import argparse
 import os
 import torch
@@ -9,10 +18,13 @@ import polars as pl
 from PIL import Image
 from sklearn.metrics import mean_absolute_percentage_error
 import numpy as np
-from src.train_regression import load_data
+
+from src.training.data_loader import load_data, get_feature_description
 
 
 class FishModel(nn.Module):
+    """ResNet-based model with optional auxiliary features."""
+
     def __init__(self, aux_size=0):
         super().__init__()
         self.backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
@@ -33,6 +45,8 @@ class FishModel(nn.Module):
 
 
 class FishDataset(Dataset):
+    """Dataset for fish images with auxiliary features."""
+
     def __init__(
         self,
         data_path,
@@ -49,7 +63,7 @@ class FishDataset(Dataset):
             self.X, self.y, self.names = load_data(data_path, feature_sets, depth_model)
         except ValueError as e:
             print(f"Warning: {e}")
-            self.X, self.y, self.names = [], [], []
+            self.X, self.y, self.names = np.array([]), np.array([]), []
 
         # Filter existence and align
         valid_indices = []
@@ -91,9 +105,7 @@ def train_cnn(
     feature_sets=["coords"],
     depth_model=None,
 ):
-    feature_desc = "_".join(sorted(feature_sets))
-    if depth_model:
-        feature_desc += f"_{depth_model}"
+    feature_desc = get_feature_description(feature_sets, depth_model)
 
     print(f"Training CNN on {dataset_name} with features: {feature_desc}...")
 
@@ -168,7 +180,9 @@ def train_cnn(
                 val_preds.extend(outputs.cpu().numpy())
                 val_targets.extend(lbls.numpy())
 
-        val_mape = mean_absolute_percentage_error(val_targets, val_preds)
+        val_mape = (
+            mean_absolute_percentage_error(val_targets, val_preds) if val_targets else 0
+        )
         print(
             f"Epoch {epoch + 1}/{epochs} - Train Loss: {train_loss / len(train_set):.4f} - Val MAPE: {val_mape:.4f}"
         )
@@ -221,8 +235,8 @@ def train_cnn(
         df.write_csv(os.path.join(pred_dir, f"cnn_{feature_desc}_{split_name}.csv"))
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def main():
+    parser = argparse.ArgumentParser(description="Train CNN model")
     parser.add_argument("--dataset", type=str, required=True, help="dataset name")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument(
@@ -241,3 +255,7 @@ if __name__ == "__main__":
         feature_sets=args.feature_set,
         depth_model="depth" if args.depth else None,
     )
+
+
+if __name__ == "__main__":
+    main()

@@ -1,3 +1,13 @@
+"""
+XGBoost Training
+
+Trains an XGBoost regressor with early stopping.
+
+Usage:
+    python -m src.training.xgboost --dataset data-inside --feature-set coords
+    python -m src.training.xgboost --dataset data-outside --feature-set scaled --depth
+"""
+
 import argparse
 import os
 import numpy as np
@@ -6,7 +16,8 @@ from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_percentage_error
 import joblib
-from src.train_regression import load_data
+
+from src.training.data_loader import load_data, get_feature_description
 
 
 def train_xgboost(
@@ -17,9 +28,7 @@ def train_xgboost(
     max_depth=6,
     learning_rate=0.1,
 ):
-    feature_desc = "_".join(sorted(feature_sets))
-    if depth_model:
-        feature_desc += f"_{depth_model}"
+    feature_desc = get_feature_description(feature_sets, depth_model)
 
     print(f"Training XGBoost on {dataset_name} with features: {feature_desc}...")
 
@@ -113,7 +122,7 @@ def train_xgboost(
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Train XGBoost model")
     parser.add_argument(
         "--dataset", type=str, required=True, help="Dataset name e.g. data-outside"
     )

@@ -1,3 +1,13 @@
+"""
+Linear Regression Training
+
+Trains a linear regression model with StandardScaler.
+
+Usage:
+    python -m src.training.regression --dataset data-inside --feature-set coords
+    python -m src.training.regression --dataset data-outside --feature-set scaled --depth
+"""
+
 import argparse
 import polars as pl
 import numpy as np
@@ -8,71 +18,13 @@ from sklearn.pipeline import Pipeline
 import joblib
 import os
 
-
-def load_data(split_path, feature_sets=["coords"], depth_model=None):
-    df = pl.read_csv(split_path)
-
-    required = []
-
-    # Base Features
-    for fs in feature_sets:
-        if fs == "coords":
-            required.extend(
-                ["Fish_w", "Fish_h", "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"]
-            )
-        elif fs == "eye":
-            required.extend(["Eye_w", "Eye_h", "Fish_w", "Fish_h"])
-        elif fs == "scaled":
-            required.extend(["Fish_w_scaled", "Fish_h_scaled"])
-
-    # Depth Features
-    if depth_model:
-        required.append("head_center_depth")
-        required.append("tail_center_depth")
-
-    # Auxiliary Features (Stats & Fish Type)
-    # Auto-detect if they exist
-    aux_cols = [
-        c for c in df.columns if c.startswith("fish_type_") or c.startswith("species_")
-    ]
-    required.extend(aux_cols)
-
-    # Drop rows missing features
-    # Check if columns exist
-    missing_cols = [c for c in required if c not in df.columns]
-    if missing_cols:
-        # Filter out missing auxiliary columns from requirement if they prefer?
-        # But for base features, we must fail.
-        # Actually, for reliability, let's fail if base features missing, but warn/skip for aux?
-        # "scaled" is a base feature now.
-
-        # Simplify: Check base features.
-        base_req = [c for c in required if not (c.startswith("fish_type_"))]
-        missing_base = [c for c in base_req if c not in df.columns]
-        if missing_base:
-            raise ValueError(f"Missing required base columns: {missing_base}")
-
-        # For aux, if missing, we just don't include them?
-        # But we added them to `required` because we found them in `df.columns`!
-        # Wait, logic above: `aux_cols` comes from `df.columns`. So they exist.
-        # So `missing_cols` should only contain missing BASE features.
-        pass
-
-    df = df.drop_nulls(subset=required)
-
-    X = df.select(required).to_numpy()
-    y = df.select("length").to_numpy().ravel()
-    names = df.select("name").to_series().to_list()
-
-    return X, y, names
+from src.training.data_loader import load_data, get_feature_description
 
 
 def train_and_eval(
     train_path, val_path, test_path, feature_sets, dataset_name, depth_model=None
 ):
-    feature_desc = "_".join(sorted(feature_sets))
-    if depth_model:
-        feature_desc += f"_{depth_model}"
+    feature_desc = get_feature_description(feature_sets, depth_model)
 
     print(f"Training Regression Model (Features: {feature_desc})")
 
@@ -129,7 +81,7 @@ def train_and_eval(
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Train linear regression model")
     parser.add_argument(
         "--dataset", type=str, required=True, help="dataset name e.g. data-inside"
     )

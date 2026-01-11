@@ -35,13 +35,13 @@ def verify_on_real_data():
         
         # Zoom In (using typical ranges from our code)
         # Magnitude 0.2 (was Ratio 0.8)
-        rin = 0.2
+        rin = 0.5
         img_in = augment_zoom(img, "in", rin)
         cv2.imwrite(os.path.join(output_dir, f"zoom_in_{rin}_{img_name}"), img_in)
         
         # Zoom Out (using typical ranges)
         # Magnitude 0.2
-        rout = 0.2
+        rout = 0.5
         img_out = augment_zoom(img, "out", rout)
         cv2.imwrite(os.path.join(output_dir, f"zoom_out_{rout}_{img_name}"), img_out)
         

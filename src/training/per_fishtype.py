@@ -5,11 +5,7 @@ Trains Linear Regression, XGBoost, and MLP models for each fish_type separately,
 plus generates merged predictions combining per-type model outputs.
 
 Usage:
-    uv run python -m src.train_per_fishtype \\
-        --dataset data-outside \\
-        --feature-set scaled \\
-        --depth \\
-        --epochs 200
+    python -m src.training.per_fishtype --dataset data-outside --feature-set scaled --depth --epochs 200
 """
 
 import argparse
@@ -19,7 +15,7 @@ import polars as pl
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -27,8 +23,8 @@ from sklearn.metrics import mean_absolute_percentage_error
 from xgboost import XGBRegressor
 import joblib
 
-from src.train_regression import load_data
-from src.train_mlp import FishMLP, TabularDataset
+from src.training.data_loader import load_data, get_feature_description
+from src.training.mlp import FishMLP, TabularDataset
 
 
 MIN_SAMPLES_WARNING = 30
@@ -121,14 +117,12 @@ def train_linear_regression(
         return None
 
     model = Pipeline([("scaler", StandardScaler()), ("regressor", LinearRegression())])
-
     model.fit(X_train, y_train)
 
     # Save model
     model_dir = os.path.join("checkpoints", dataset_name)
     os.makedirs(model_dir, exist_ok=True)
-    save_path = os.path.join(model_dir, f"{model_name}.joblib")
-    joblib.dump(model, save_path)
+    joblib.dump(model, os.path.join(model_dir, f"{model_name}.joblib"))
 
     # Save predictions
     pred_dir = os.path.join("data", dataset_name, "predictions")
@@ -400,13 +394,11 @@ def generate_merged_predictions(dataset_name, feature_desc, fish_types, model_ty
 
         if merged_dfs:
             merged_df = pl.concat(merged_dfs)
-            # Remove fish_type column for consistency with other prediction files
             merged_df = merged_df.select(["name", "gt_length", "pred_length"])
 
             output_filename = f"{model_type}_merged_{feature_desc}_{split}.csv"
             merged_df.write_csv(os.path.join(pred_dir, output_filename))
 
-            # Calculate merged MAPE
             mape = mean_absolute_percentage_error(
                 merged_df["gt_length"].to_numpy(), merged_df["pred_length"].to_numpy()
             )
@@ -417,9 +409,7 @@ def generate_merged_predictions(dataset_name, feature_desc, fish_types, model_ty
 
 def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200):
     """Main function to train models per fish type."""
-    feature_desc = "_".join(sorted(feature_sets))
-    if depth_model:
-        feature_desc += f"_{depth_model}"
+    feature_desc = get_feature_description(feature_sets, depth_model)
 
     print(f"\n{'=' * 60}")
     print(f"Per-Fish-Type Training: {dataset_name}")
@@ -497,7 +487,6 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
     for fish_type in fish_types:
         print(f"\n--- Training for: {fish_type} ---")
 
-        # Filter data
         X_train_ft, y_train_ft, names_train_ft = filter_data_by_fishtype(
             X_train, y_train, names_train, df_train, fish_type
         )
@@ -522,7 +511,6 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
             print(f"  SKIPPING: Not enough training samples ({len(X_train_ft)} < 5)")
             continue
 
-        # Train all models for this fish type
         train_linear_regression(
             X_train_ft,
             y_train_ft,
@@ -537,7 +525,6 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
             feature_desc,
             fish_type=fish_type,
         )
-
         train_xgboost_model(
             X_train_ft,
             y_train_ft,
@@ -552,7 +539,6 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
             feature_desc,
             fish_type=fish_type,
         )
-
         train_mlp_model(
             X_train_ft,
             y_train_ft,
@@ -591,11 +577,7 @@ def main():
         choices=["coords", "scaled", "eye"],
         required=True,
     )
-    parser.add_argument(
-        "--depth",
-        action="store_true",
-        help="Use depth v2 features",
-    )
+    parser.add_argument("--depth", action="store_true", help="Use depth v2 features")
     parser.add_argument(
         "--epochs", type=int, default=200, help="Number of epochs for MLP"
     )

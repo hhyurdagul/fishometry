@@ -1,3 +1,12 @@
+"""
+MLP (Multi-Layer Perceptron) Training
+
+Trains a simple feedforward neural network.
+
+Usage:
+    python -m src.training.mlp --dataset data-inside --feature-set coords --epochs 200
+"""
+
 import argparse
 import os
 import torch
@@ -8,11 +17,13 @@ import numpy as np
 import polars as pl
 from sklearn.metrics import mean_absolute_percentage_error
 from sklearn.preprocessing import StandardScaler
-import joblib
-from src.train_regression import load_data
+
+from src.training.data_loader import load_data, get_feature_description
 
 
 class TabularDataset(Dataset):
+    """Dataset for tabular data."""
+
     def __init__(self, X, y, names):
         self.X = torch.tensor(X, dtype=torch.float32)
         self.y = torch.tensor(y, dtype=torch.float32)
@@ -26,6 +37,8 @@ class TabularDataset(Dataset):
 
 
 class FishMLP(nn.Module):
+    """Simple MLP for fish length prediction."""
+
     def __init__(self, input_dim):
         super().__init__()
         self.net = nn.Sequential(
@@ -48,9 +61,7 @@ def train_mlp(
     feature_sets=["coords"],
     depth_model=None,
 ):
-    feature_desc = "_".join(sorted(feature_sets))
-    if depth_model:
-        feature_desc += f"_{depth_model}"
+    feature_desc = get_feature_description(feature_sets, depth_model)
 
     print(f"Training MLP on {dataset_name} with features: {feature_desc}...")
 
@@ -74,8 +85,6 @@ def train_mlp(
     # Scaling
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
-    # Save scaler for inference consistency (optional but good practice)
-    # joblib.dump(scaler, f"checkpoints/{dataset_name}/mlp_scaler_{feature_desc}.joblib")
 
     if len(X_val) > 0:
         X_val = scaler.transform(X_val)
@@ -142,7 +151,6 @@ def train_mlp(
         if val_mape < best_mape:
             best_mape = val_mape
             torch.save(model.state_dict(), save_path)
-            # print("  Values improved, saved model.")
 
     # Evaluation
     model.load_state_dict(torch.load(save_path))
@@ -185,7 +193,7 @@ def train_mlp(
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Train MLP model")
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument(
