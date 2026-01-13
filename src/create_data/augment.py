@@ -4,12 +4,13 @@ Data Augmentation Utilities
 Provides zoom augmentation and dataset creation with zoomed images.
 
 Usage:
-    python -m src.data.augment --source data-inside --dest data-inside-zoom
+    python -m src.create_data.augment --source data-inside --dest data-inside-zoom
 """
 
-import argparse
 import os
 import random
+import argparse
+
 import cv2
 import polars as pl
 
