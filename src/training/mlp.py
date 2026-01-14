@@ -60,8 +60,9 @@ def train_mlp(
     lr=1e-3,
     feature_sets=["coords"],
     depth_model=None,
+    include_stats=False,
 ):
-    feature_desc = get_feature_description(feature_sets, depth_model)
+    feature_desc = get_feature_description(feature_sets, depth_model, include_stats)
 
     print(f"Training MLP on {dataset_name} with features: {feature_desc}...")
 
@@ -70,13 +71,13 @@ def train_mlp(
     # Load Data
     try:
         X_train, y_train, names_train = load_data(
-            f"{base_dir}/processed_train.csv", feature_sets, depth_model
+            f"{base_dir}/processed_train.csv", feature_sets, depth_model, include_stats
         )
         X_val, y_val, names_val = load_data(
-            f"{base_dir}/processed_val.csv", feature_sets, depth_model
+            f"{base_dir}/processed_val.csv", feature_sets, depth_model, include_stats
         )
         X_test, y_test, names_test = load_data(
-            f"{base_dir}/processed_test.csv", feature_sets, depth_model
+            f"{base_dir}/processed_test.csv", feature_sets, depth_model, include_stats
         )
     except ValueError as e:
         print(f"Error loading data: {e}")
@@ -204,6 +205,9 @@ def main():
         default=["coords"],
     )
     parser.add_argument("--depth", action="store_true", help="Use depth v2 features")
+    parser.add_argument(
+        "--stats", action="store_true", help="Include species stats features"
+    )
     args = parser.parse_args()
 
     train_mlp(
@@ -211,6 +215,7 @@ def main():
         epochs=args.epochs,
         feature_sets=args.feature_set,
         depth_model="depth" if args.depth else None,
+        include_stats=args.stats,
     )
 
 

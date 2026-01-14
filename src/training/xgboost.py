@@ -24,11 +24,12 @@ def train_xgboost(
     dataset_name,
     feature_sets=["coords"],
     depth_model=None,
+    include_stats=False,
     n_estimators=100,
     max_depth=6,
     learning_rate=0.1,
 ):
-    feature_desc = get_feature_description(feature_sets, depth_model)
+    feature_desc = get_feature_description(feature_sets, depth_model, include_stats)
 
     print(f"Training XGBoost on {dataset_name} with features: {feature_desc}...")
 
@@ -37,13 +38,13 @@ def train_xgboost(
     # Load Data
     try:
         X_train, y_train, names_train = load_data(
-            f"{base_dir}/processed_train.csv", feature_sets, depth_model
+            f"{base_dir}/processed_train.csv", feature_sets, depth_model, include_stats
         )
         X_val, y_val, names_val = load_data(
-            f"{base_dir}/processed_val.csv", feature_sets, depth_model
+            f"{base_dir}/processed_val.csv", feature_sets, depth_model, include_stats
         )
         X_test, y_test, names_test = load_data(
-            f"{base_dir}/processed_test.csv", feature_sets, depth_model
+            f"{base_dir}/processed_test.csv", feature_sets, depth_model, include_stats
         )
     except ValueError as e:
         print(f"Error loading data: {e}")
@@ -139,6 +140,11 @@ def main():
         help="Use depth v2 features",
     )
     parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Include species stats features",
+    )
+    parser.add_argument(
         "--n-estimators", type=int, default=100, help="Number of boosting rounds"
     )
     parser.add_argument("--max-depth", type=int, default=6, help="Maximum tree depth")
@@ -151,6 +157,7 @@ def main():
         args.dataset,
         feature_sets=args.feature_set,
         depth_model="depth" if args.depth else None,
+        include_stats=args.stats,
         n_estimators=args.n_estimators,
         max_depth=args.max_depth,
         learning_rate=args.learning_rate,

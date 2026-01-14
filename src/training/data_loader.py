@@ -13,6 +13,7 @@ def load_data(
     split_path: str,
     feature_sets: List[str] = ["coords"],
     depth_model: Optional[str] = None,
+    include_stats: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Load and prepare data for training.
@@ -21,6 +22,7 @@ def load_data(
         split_path: Path to the processed split CSV
         feature_sets: List of feature sets to include ("coords", "scaled", "eye")
         depth_model: If provided, includes depth features
+        include_stats: If True, includes species_* columns as features
 
     Returns:
         X: Feature matrix (n_samples, n_features)
@@ -50,11 +52,14 @@ def load_data(
         required.append("head_center_depth")
         required.append("tail_center_depth")
 
-    # Auxiliary Features (Stats & Fish Type)
-    # Auto-detect if they exist
-    aux_cols = [
-        c for c in df.columns if c.startswith("fish_type_") or c.startswith("species_")
-    ]
+    # Auxiliary Features (Fish Type - always included if present)
+    aux_cols = [c for c in df.columns if c.startswith("fish_type_")]
+
+    # Species stats - only included if include_stats is True
+    if include_stats:
+        stats_cols = [c for c in df.columns if c.startswith("species_")]
+        aux_cols.extend(stats_cols)
+
     required.extend(aux_cols)
 
     # Drop rows missing features
@@ -88,7 +93,9 @@ def load_data(
 
 
 def get_feature_description(
-    feature_sets: List[str], depth_model: Optional[str] = None
+    feature_sets: List[str],
+    depth_model: Optional[str] = None,
+    include_stats: bool = False,
 ) -> str:
     """
     Generate a feature description string for model naming.
@@ -96,11 +103,14 @@ def get_feature_description(
     Args:
         feature_sets: List of feature sets used
         depth_model: Depth model name if used
+        include_stats: Whether species stats are included
 
     Returns:
-        Feature description string (e.g., "coords_scaled_depth")
+        Feature description string (e.g., "coords_scaled_depth_stats")
     """
     feature_desc = "_".join(sorted(feature_sets))
     if depth_model:
         feature_desc += f"_{depth_model}"
+    if include_stats:
+        feature_desc += "_stats"
     return feature_desc

@@ -22,16 +22,28 @@ from src.training.data_loader import load_data, get_feature_description
 
 
 def train_and_eval(
-    train_path, val_path, test_path, feature_sets, dataset_name, depth_model=None
+    train_path,
+    val_path,
+    test_path,
+    feature_sets,
+    dataset_name,
+    depth_model=None,
+    include_stats=False,
 ):
-    feature_desc = get_feature_description(feature_sets, depth_model)
+    feature_desc = get_feature_description(feature_sets, depth_model, include_stats)
 
     print(f"Training Regression Model (Features: {feature_desc})")
 
     try:
-        X_train, y_train, names_train = load_data(train_path, feature_sets, depth_model)
-        X_val, y_val, names_val = load_data(val_path, feature_sets, depth_model)
-        X_test, y_test, names_test = load_data(test_path, feature_sets, depth_model)
+        X_train, y_train, names_train = load_data(
+            train_path, feature_sets, depth_model, include_stats
+        )
+        X_val, y_val, names_val = load_data(
+            val_path, feature_sets, depth_model, include_stats
+        )
+        X_test, y_test, names_test = load_data(
+            test_path, feature_sets, depth_model, include_stats
+        )
     except ValueError as e:
         print(f"Skipping training due to data issue: {e}")
         return
@@ -97,6 +109,11 @@ def main():
         action="store_true",
         help="Use depth v2 features",
     )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Include species stats features",
+    )
     args = parser.parse_args()
 
     base_dir = f"data/{args.dataset}/processed"
@@ -111,6 +128,7 @@ def main():
         args.feature_set,
         args.dataset,
         depth_model="depth" if args.depth else None,
+        include_stats=args.stats,
     )
 
 

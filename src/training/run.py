@@ -244,66 +244,6 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         ]
         subprocess.run(cmd, check=True)
 
-    # Per fish models, only for data-outside
-    if pipeline_id == 7:
-        # MLP
-        cmd = [
-            sys.executable,
-            "-m",
-            "src.training.per_fishtype",
-            "--dataset",
-            dataset_name,
-            "--feature-set",
-            "coords",
-            "--epochs",
-            "200",
-        ]
-        subprocess.run(cmd, check=True)
-
-    if pipeline_id == 8:
-        cmd = [
-            sys.executable,
-            "-m",
-            "src.training.per_fishtype",
-            "--dataset",
-            dataset_name,
-            "--feature-set",
-            "scaled",
-            "--epochs",
-            "200",
-        ]
-        subprocess.run(cmd, check=True)
-
-    if pipeline_id == 9:
-        cmd = [
-            sys.executable,
-            "-m",
-            "src.training.per_fishtype",
-            "--dataset",
-            dataset_name,
-            "--feature-set",
-            "coords",
-            "--depth",
-            "--epochs",
-            "200",
-        ]
-        subprocess.run(cmd, check=True)
-
-    if pipeline_id == 10:
-        cmd = [
-            sys.executable,
-            "-m",
-            "src.training.per_fishtype",
-            "--dataset",
-            dataset_name,
-            "--feature-set",
-            "scaled",
-            "--depth",
-            "--epochs",
-            "200",
-        ]
-        subprocess.run(cmd, check=True)
-
 
 def main():
     parser = argparse.ArgumentParser(description="Training orchestrator")
@@ -328,27 +268,16 @@ def main():
     if args.dataset and args.pipeline:
         tasks.append((args.dataset, args.pipeline))
     else:
-        # tasks.append(("data-inside", 0))
-        # tasks.append(("data-inside", 1))
-        # tasks.append(("data-inside", 2))
-        # tasks.append(("data-inside", 6))
-        #
-        # tasks.append(("data-inside-zoom", 0))
-        # tasks.append(("data-inside-zoom", 1))
-        # tasks.append(("data-inside-zoom", 2))
-        # tasks.append(("data-inside-zoom", 4))
-        # tasks.append(("data-inside-zoom", 6))
+        tasks.append(("data-inside", 0))
+        tasks.append(("data-inside", 1))
+        tasks.append(("data-inside", 2))
+        tasks.append(("data-inside", 6))
 
-        tasks.append(("data-outside", 0))
-        tasks.append(("data-outside", 1))
-        # tasks.append(("data-outside", 3))
-        # tasks.append(("data-outside", 4))
-        # tasks.append(("data-outside", 5))
-        # tasks.append(("data-outside", 6))
-        # tasks.append(("data-outside", 7))
-        # tasks.append(("data-outside", 8))
-        # tasks.append(("data-outside", 9))
-        # tasks.append(("data-outside", 10))
+        tasks.append(("data-inside-zoom", 0))
+        tasks.append(("data-inside-zoom", 1))
+        tasks.append(("data-inside-zoom", 2))
+        tasks.append(("data-inside-zoom", 4))
+        tasks.append(("data-inside-zoom", 6))
 
     for ds, pid in tasks:
         run_specific_pipeline(ds, pid)

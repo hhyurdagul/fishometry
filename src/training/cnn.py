@@ -54,13 +54,16 @@ class FishDataset(Dataset):
         transform=None,
         feature_sets=["coords"],
         depth_model=None,
+        include_stats=False,
     ):
         self.img_dir = img_dir
         self.transform = transform
 
         # Load data using regression logic
         try:
-            self.X, self.y, self.names = load_data(data_path, feature_sets, depth_model)
+            self.X, self.y, self.names = load_data(
+                data_path, feature_sets, depth_model, include_stats
+            )
         except ValueError as e:
             print(f"Warning: {e}")
             self.X, self.y, self.names = np.array([]), np.array([]), []
@@ -104,8 +107,9 @@ def train_cnn(
     lr=1e-4,
     feature_sets=["coords"],
     depth_model=None,
+    include_stats=False,
 ):
-    feature_desc = get_feature_description(feature_sets, depth_model)
+    feature_desc = get_feature_description(feature_sets, depth_model, include_stats)
 
     print(f"Training CNN on {dataset_name} with features: {feature_desc}...")
 
@@ -121,13 +125,28 @@ def train_cnn(
     )
 
     train_set = FishDataset(
-        f"{base_dir}/processed_train.csv", img_dir, transform, feature_sets, depth_model
+        f"{base_dir}/processed_train.csv",
+        img_dir,
+        transform,
+        feature_sets,
+        depth_model,
+        include_stats,
     )
     val_set = FishDataset(
-        f"{base_dir}/processed_val.csv", img_dir, transform, feature_sets, depth_model
+        f"{base_dir}/processed_val.csv",
+        img_dir,
+        transform,
+        feature_sets,
+        depth_model,
+        include_stats,
     )
     test_set = FishDataset(
-        f"{base_dir}/processed_test.csv", img_dir, transform, feature_sets, depth_model
+        f"{base_dir}/processed_test.csv",
+        img_dir,
+        transform,
+        feature_sets,
+        depth_model,
+        include_stats,
     )
 
     print(f"Sizes: Train={len(train_set)} Val={len(val_set)} Test={len(test_set)}")
@@ -247,6 +266,9 @@ def main():
         default=["coords"],
     )
     parser.add_argument("--depth", action="store_true", help="Use depth v2 features")
+    parser.add_argument(
+        "--stats", action="store_true", help="Include species stats features"
+    )
     args = parser.parse_args()
 
     train_cnn(
@@ -254,6 +276,7 @@ def main():
         epochs=args.epochs,
         feature_sets=args.feature_set,
         depth_model="depth" if args.depth else None,
+        include_stats=args.stats,
     )
 
 

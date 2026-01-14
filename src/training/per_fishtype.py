@@ -60,10 +60,12 @@ def filter_data_by_fishtype(X, y, names, df, fish_type):
     return X_filtered, y_filtered, names_filtered
 
 
-def load_data_with_fishtype(split_path, feature_sets, depth_model=None):
+def load_data_with_fishtype(
+    split_path, feature_sets, depth_model=None, include_stats=False
+):
     """Load data and also return the full dataframe for filtering."""
     df = pl.read_csv(split_path)
-    X, y, names = load_data(split_path, feature_sets, depth_model)
+    X, y, names = load_data(split_path, feature_sets, depth_model, include_stats)
 
     # We need to filter df to match X, y, names (after null drops)
     # Rebuild df with same filtering logic
@@ -82,9 +84,9 @@ def load_data_with_fishtype(split_path, feature_sets, depth_model=None):
         required.append("head_center_depth")
         required.append("tail_center_depth")
 
-    aux_cols = [
-        c for c in df.columns if c.startswith("fish_type_") or c.startswith("species_")
-    ]
+    aux_cols = [c for c in df.columns if c.startswith("fish_type_")]
+    if include_stats:
+        aux_cols.extend([c for c in df.columns if c.startswith("species_")])
     required.extend(aux_cols)
 
     # Filter same way as load_data
@@ -422,9 +424,11 @@ def generate_merged_predictions(
             )
 
 
-def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200):
+def train_per_fishtype(
+    dataset_name, feature_sets, depth_model=None, include_stats=False, epochs=200
+):
     """Main function to train models per fish type."""
-    feature_desc = get_feature_description(feature_sets, depth_model)
+    feature_desc = get_feature_description(feature_sets, depth_model, include_stats)
 
     print(f"\n{'=' * 60}")
     print(f"Per-Fish-Type Training: {dataset_name}")
@@ -440,13 +444,13 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
 
     try:
         X_train, y_train, names_train, df_train = load_data_with_fishtype(
-            f"{base_dir}/processed_train.csv", feature_sets, depth_model
+            f"{base_dir}/processed_train.csv", feature_sets, depth_model, include_stats
         )
         X_val, y_val, names_val, df_val = load_data_with_fishtype(
-            f"{base_dir}/processed_val.csv", feature_sets, depth_model
+            f"{base_dir}/processed_val.csv", feature_sets, depth_model, include_stats
         )
         X_test, y_test, names_test, df_test = load_data_with_fishtype(
-            f"{base_dir}/processed_test.csv", feature_sets, depth_model
+            f"{base_dir}/processed_test.csv", feature_sets, depth_model, include_stats
         )
     except ValueError as e:
         print(f"Error loading data: {e}")
@@ -605,6 +609,9 @@ def main():
     )
     parser.add_argument("--depth", action="store_true", help="Use depth v2 features")
     parser.add_argument(
+        "--stats", action="store_true", help="Include species stats features"
+    )
+    parser.add_argument(
         "--epochs", type=int, default=200, help="Number of epochs for MLP"
     )
     args = parser.parse_args()
@@ -613,6 +620,7 @@ def main():
         args.dataset,
         feature_sets=args.feature_set,
         depth_model="depth" if args.depth else None,
+        include_stats=args.stats,
         epochs=args.epochs,
     )
 
