@@ -4,8 +4,8 @@ Linear Regression Training
 Trains a linear regression model with StandardScaler.
 
 Usage:
-    python -m src.training.regression --dataset data-inside --feature-set coords
-    python -m src.training.regression --dataset data-outside --feature-set scaled --depth
+    python -m src.training.linear --dataset data-inside --feature-set coords
+    python -m src.training.linear --dataset data-outside --feature-set scaled --depth
 """
 
 import argparse
@@ -71,11 +71,11 @@ def train_and_eval(
             }
         )
 
-        filename = f"{feature_desc}_{split_name}.csv"
+        filename = f"linear_{feature_desc}_{split_name}.csv"
         res_df.write_csv(os.path.join(pred_dir, filename))
 
     # Save Model
-    save_name = f"regression_{feature_desc}.joblib"
+    save_name = f"linear_{feature_desc}.joblib"
     joblib.dump(model, os.path.join(model_dir, save_name))
     print(f"Model saved to {os.path.join(model_dir, save_name)}")
 

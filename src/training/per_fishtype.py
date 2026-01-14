@@ -110,7 +110,7 @@ def train_linear_regression(
 ):
     """Train linear regression model."""
     suffix = f"_{fish_type}" if fish_type else ""
-    model_name = f"regression{suffix}_{feature_desc}"
+    model_name = f"linear{suffix}_{feature_desc}"
 
     if len(X_train) == 0:
         print(f"  [LR] No training samples for {fish_type or 'all'}")
@@ -148,8 +148,10 @@ def train_linear_regression(
             }
         )
 
-        filename = f"regression{suffix}_{feature_desc}_{split_name}.csv"
-        df.write_csv(os.path.join(pred_dir, filename))
+        # Only save individual predictions for non-fish-type-specific models
+        if fish_type is None:
+            filename = f"linear{suffix}_{feature_desc}_{split_name}.csv"
+            df.write_csv(os.path.join(pred_dir, filename))
         results[split_name] = {"mape": mape, "predictions": df}
 
     if "val" in results:
@@ -231,8 +233,10 @@ def train_xgboost_model(
             }
         )
 
-        filename = f"xgboost{suffix}_{feature_desc}_{split_name}.csv"
-        df.write_csv(os.path.join(pred_dir, filename))
+        # Only save individual predictions for non-fish-type-specific models
+        if fish_type is None:
+            filename = f"xgboost{suffix}_{feature_desc}_{split_name}.csv"
+            df.write_csv(os.path.join(pred_dir, filename))
         results[split_name] = {"mape": mape, "predictions": df}
 
     if "val" in results:
@@ -366,8 +370,10 @@ def train_mlp_model(
             }
         )
 
-        filename = f"mlp{suffix}_{feature_desc}_{split_name}.csv"
-        df.write_csv(os.path.join(pred_dir, filename))
+        # Only save individual predictions for non-fish-type-specific models
+        if fish_type is None:
+            filename = f"mlp{suffix}_{feature_desc}_{split_name}.csv"
+            df.write_csv(os.path.join(pred_dir, filename))
         results[split_name] = {"mape": mape, "predictions": df}
 
     if "val" in results:
@@ -376,21 +382,30 @@ def train_mlp_model(
     return results
 
 
-def generate_merged_predictions(dataset_name, feature_desc, fish_types, model_type):
-    """Merge per-fish-type predictions into a single file."""
+def generate_merged_predictions(
+    dataset_name, feature_desc, fish_types, model_type, all_results
+):
+    """Merge per-fish-type predictions into a single file.
+
+    Args:
+        dataset_name: Name of the dataset
+        feature_desc: Feature description string
+        fish_types: List of fish types
+        model_type: Type of model (linear, xgboost, mlp)
+        all_results: Dict mapping fish_type -> results dict from training
+    """
     pred_dir = os.path.join("data", dataset_name, "predictions")
+    os.makedirs(pred_dir, exist_ok=True)
 
     for split in ["train", "val", "test"]:
         merged_dfs = []
 
         for fish_type in fish_types:
-            filename = f"{model_type}_{fish_type}_{feature_desc}_{split}.csv"
-            filepath = os.path.join(pred_dir, filename)
-
-            if os.path.exists(filepath):
-                df = pl.read_csv(filepath)
-                df = df.with_columns(pl.lit(fish_type).alias("fish_type"))
-                merged_dfs.append(df)
+            if fish_type in all_results and all_results[fish_type] is not None:
+                results = all_results[fish_type]
+                if split in results:
+                    df = results[split]["predictions"]
+                    merged_dfs.append(df)
 
         if merged_dfs:
             merged_df = pl.concat(merged_dfs)
@@ -483,7 +498,11 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
         epochs=epochs,
     )
 
-    # Train per fish type
+    # Train per fish type and collect results
+    linear_results = {}
+    xgboost_results = {}
+    mlp_results = {}
+
     for fish_type in fish_types:
         print(f"\n--- Training for: {fish_type} ---")
 
@@ -511,7 +530,7 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
             print(f"  SKIPPING: Not enough training samples ({len(X_train_ft)} < 5)")
             continue
 
-        train_linear_regression(
+        linear_results[fish_type] = train_linear_regression(
             X_train_ft,
             y_train_ft,
             X_val_ft,
@@ -525,7 +544,7 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
             feature_desc,
             fish_type=fish_type,
         )
-        train_xgboost_model(
+        xgboost_results[fish_type] = train_xgboost_model(
             X_train_ft,
             y_train_ft,
             X_val_ft,
@@ -539,7 +558,7 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
             feature_desc,
             fish_type=fish_type,
         )
-        train_mlp_model(
+        mlp_results[fish_type] = train_mlp_model(
             X_train_ft,
             y_train_ft,
             X_val_ft,
@@ -557,8 +576,15 @@ def train_per_fishtype(dataset_name, feature_sets, depth_model=None, epochs=200)
 
     # Generate merged predictions
     print(f"\n--- Generating Merged Predictions ---")
-    for model_type in ["regression", "xgboost", "mlp"]:
-        generate_merged_predictions(dataset_name, feature_desc, fish_types, model_type)
+    generate_merged_predictions(
+        dataset_name, feature_desc, fish_types, "linear", linear_results
+    )
+    generate_merged_predictions(
+        dataset_name, feature_desc, fish_types, "xgboost", xgboost_results
+    )
+    generate_merged_predictions(
+        dataset_name, feature_desc, fish_types, "mlp", mlp_results
+    )
 
     print(f"\n{'=' * 60}")
     print("Training complete!")

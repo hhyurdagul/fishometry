@@ -147,7 +147,7 @@ def render_correlation(dataset, df_meta):
         )
     )
 
-    st.altair_chart(heatmap + text, use_container_width=True)
+    st.altair_chart(heatmap + text, width="stretch")
 
     # --- 3. Scatter Plots ---
     st.subheader("Scatter Plot: Feature vs Length")
@@ -212,7 +212,7 @@ def render_correlation(dataset, df_meta):
         color="red", strokeDash=[5, 5]
     )
 
-    st.altair_chart(scatter + regression, use_container_width=True)
+    st.altair_chart(scatter + regression, width="stretch")
 
     # --- 4. Summary Statistics ---
     st.subheader("Feature Summary Statistics")
