@@ -17,7 +17,7 @@ class SegmentStep(PipelineStep):
         self.device = config["params"]["device"]
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        sam = sam_model_registry["vit_h"](checkpoint=self.model_path)
+        sam = sam_model_registry["vit_l"](checkpoint=self.model_path)
         sam.to(self.device)
         predictor = SamPredictor(sam)
 

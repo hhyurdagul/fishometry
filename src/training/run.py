@@ -11,46 +11,6 @@ Usage:
 import argparse
 import sys
 import subprocess
-from src.utils.io import load_config
-
-
-def get_steps_for_pipeline(config, pipeline_id):
-    """Get preprocessing steps for a given pipeline configuration.
-
-    Imports are lazy to avoid requiring heavy dependencies (ultralytics, etc.)
-    when only running training without preprocessing.
-    """
-    # Lazy imports - only needed if preprocessing is actually run
-    from src.preprocessing.steps.yolo import YoloStep
-    from src.preprocessing.steps.rotate import RotateStep
-    from src.preprocessing.steps.depth import DepthStep
-    from src.preprocessing.steps.segment import SegmentStep
-    from src.preprocessing.steps.blackout import BlackoutStep
-
-    # Pipeline 1: Yolo -> Rotate -> Yolo -> Regression (Coords)
-    # Pipeline 2: Yolo -> Rotate -> Yolo -> Depth -> Regression (Coords+Depth)
-    # Pipeline 3: Yolo -> Rotate -> Yolo -> Segment -> Blackout -> CNN
-
-    # Common prefix
-    steps = [
-        YoloStep(config, stage="initial"),
-        RotateStep(config),
-        YoloStep(config, stage="rotated"),
-    ]
-
-    if pipeline_id == 1:
-        # Just need coords, so we are done with preprocessing
-        pass
-
-    elif pipeline_id == 2:
-        steps.append(DepthStep(config))
-
-    elif pipeline_id == 3:
-        # Segment -> Blackout
-        steps.append(SegmentStep(config))
-        steps.append(BlackoutStep(config))
-
-    return steps
 
 
 def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
@@ -69,19 +29,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
             f"configs/config_{dataset_name.replace('data-', '').replace('-', '_')}.yaml"
         )
 
-    config = load_config(config_path)
-    steps = get_steps_for_pipeline(config, pipeline_id)
-
     splits = ["train", "val", "test"] if all_splits else ["train"]
-
-    # Run Pipeline Steps (Preprocessing)
-    for split in splits:
-        in_path = f"data/{dataset_name}/splits/{split}.csv"
-        out_path = f"data/{dataset_name}/processed/processed_{split}.csv"
-
-        # Preprocessing can be uncommented if needed
-        # print(f" Processing split: {split}")
-        # run_pipeline(config, in_path, out_path, steps=steps)
 
     # Run Baseline
     if pipeline_id == 0:
@@ -310,12 +258,33 @@ def main():
 
     tasks = []
 
+    # 0: Baseline
+    # 1: Regression with coord features
+    # 2: Regression with eye features
+    # 3: Regression with scaled features
+    # 4: Regression with depth+coord features
+    # 5: Regression with depth+scaled features
+    # 6: CNN with depth+scaled features and blackout images
     if args.dataset and args.pipeline:
         tasks.append((args.dataset, args.pipeline))
     else:
         tasks.append(("data-inside", 0))
+        tasks.append(("data-inside", 1))
+        tasks.append(("data-inside", 2))
+        tasks.append(("data-inside", 6))
+
         tasks.append(("data-inside-zoom", 0))
+        tasks.append(("data-inside-zoom", 1))
+        tasks.append(("data-inside-zoom", 2))
+        tasks.append(("data-inside-zoom", 4))
+        tasks.append(("data-inside-zoom", 6))
+
         tasks.append(("data-outside", 0))
+        tasks.append(("data-outside", 1))
+        tasks.append(("data-outside", 3))
+        tasks.append(("data-outside", 4))
+        tasks.append(("data-outside", 5))
+        tasks.append(("data-outside", 6))
 
     for ds, pid in tasks:
         run_specific_pipeline(ds, pid)

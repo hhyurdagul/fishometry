@@ -104,7 +104,7 @@ class RotateStep(PipelineStep):
             # M[1, 2] += new_h (but we need to be careful with the affine transform math)
             # y_new = -(M10*x + M11*y + M12) + new_h
             #       = -M10*x - M11*y + (new_h - M12)
-            M[1, :] *= -1
+            M[1, :] = M[1, :] * -1
             M[1, 2] += new_h
 
         # 3. Crop Black Borders (Largest Inscribed Rectangle)
