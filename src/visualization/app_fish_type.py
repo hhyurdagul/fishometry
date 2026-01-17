@@ -62,21 +62,21 @@ def load_prediction_df(file_path):
     return pl.read_csv(file_path)
 
 
-def filter_by_fish_type(df, df_meta, fish_type):
-    """Filter prediction dataframe by fish type using metadata."""
-    if fish_type == "All" or df_meta is None:
+def filter_by_fish_type(df, df_meta, fish_types):
+    """Filter prediction dataframe by fish type(s) using metadata."""
+    if not fish_types or df_meta is None:
         return df
 
-    # Get names for this fish type
-    fish_names = df_meta.filter(pl.col("fish_type") == fish_type)["name"].to_list()
+    # Get names for selected fish types
+    fish_names = df_meta.filter(pl.col("fish_type").is_in(fish_types))["name"].to_list()
     return df.filter(pl.col("name").is_in(fish_names))
 
 
-def filter_metadata_by_fish_type(df_meta, fish_type):
-    """Filter metadata dataframe by fish type."""
-    if fish_type == "All" or df_meta is None:
+def filter_metadata_by_fish_type(df_meta, fish_types):
+    """Filter metadata dataframe by fish type(s)."""
+    if not fish_types or df_meta is None:
         return df_meta
-    return df_meta.filter(pl.col("fish_type") == fish_type)
+    return df_meta.filter(pl.col("fish_type").is_in(fish_types))
 
 
 @st.cache_data
@@ -210,9 +210,12 @@ def calculate_metrics(df):
 
 
 # --- Views ---
-def render_overview(df_meta, fish_type, pred_files):
-    """Overview of all models for selected fish type."""
-    st.header(f"Model Overview: {fish_type}")
+def render_overview(df_meta, fish_types, pred_files):
+    """Overview of all models for selected fish type(s)."""
+    fish_label = (
+        ", ".join(fish_types) if len(fish_types) <= 3 else f"{len(fish_types)} types"
+    )
+    st.header(f"Model Overview: {fish_label}")
 
     if not pred_files:
         st.warning("No prediction files found.")
@@ -240,8 +243,8 @@ def render_overview(df_meta, fish_type, pred_files):
                 ]
             )
 
-            # Filter by fish type
-            df_filtered = filter_by_fish_type(df, df_meta, fish_type)
+            # Filter by fish type(s)
+            df_filtered = filter_by_fish_type(df, df_meta, fish_types)
 
             if df_filtered.height == 0:
                 continue
@@ -333,7 +336,7 @@ def render_comparison_by_fish_type(df_meta, pred_files):
 
     # Calculate per fish type
     for ft in fish_types:
-        df_filtered = filter_by_fish_type(df, df_meta, ft)
+        df_filtered = filter_by_fish_type(df, df_meta, [ft])
         if df_filtered.height > 0:
             mae, mape, r2 = calculate_metrics(df_filtered)
             results.append(
@@ -375,9 +378,12 @@ def render_comparison_by_fish_type(df_meta, pred_files):
     st.altair_chart(chart, width="stretch")
 
 
-def render_detailed_analysis(df_meta, fish_type, pred_files):
-    """Detailed prediction analysis for selected fish type."""
-    st.header(f"Detailed Analysis: {fish_type}")
+def render_detailed_analysis(df_meta, fish_types, pred_files):
+    """Detailed prediction analysis for selected fish type(s)."""
+    fish_label = (
+        ", ".join(fish_types) if len(fish_types) <= 3 else f"{len(fish_types)} types"
+    )
+    st.header(f"Detailed Analysis: {fish_label}")
 
     if not pred_files:
         st.warning("No prediction files found.")
@@ -401,11 +407,11 @@ def render_detailed_analysis(df_meta, fish_type, pred_files):
         ]
     )
 
-    # Filter by fish type
-    df_filtered = filter_by_fish_type(df, df_meta, fish_type)
+    # Filter by fish type(s)
+    df_filtered = filter_by_fish_type(df, df_meta, fish_types)
 
     if df_filtered.height == 0:
-        st.warning(f"No data available for fish type: {fish_type}")
+        st.warning(f"No data available for selected fish types")
         return
 
     # Add error columns
@@ -545,7 +551,7 @@ def render_multi_model_fish_type(df_meta, pred_files):
             model_name = os.path.basename(f).replace(f"_{split_choice}.csv", "")
 
             for ft in fish_types:
-                df_filtered = filter_by_fish_type(df, df_meta, ft)
+                df_filtered = filter_by_fish_type(df, df_meta, [ft])
                 if df_filtered.height > 0:
                     mae, mape, r2 = calculate_metrics(df_filtered)
                     heatmap_data.append(
@@ -607,23 +613,23 @@ def render_multi_model_fish_type(df_meta, pred_files):
     st.dataframe(pivot_df, width="stretch")
 
 
-def render_data_explorer(df_meta, fish_type, depth_model):
+def render_data_explorer(df_meta, fish_types, depth_model):
     """Data explorer view with fish type filtering."""
-    st.header(f"Data Explorer: {fish_type}")
+    fish_label = (
+        ", ".join(fish_types) if len(fish_types) <= 3 else f"{len(fish_types)} types"
+    )
+    st.header(f"Data Explorer: {fish_label}")
 
-    # Filter metadata by fish type
-    df_filtered = filter_metadata_by_fish_type(df_meta, fish_type)
+    # Filter metadata by fish type(s)
+    df_filtered = filter_metadata_by_fish_type(df_meta, fish_types)
 
     if df_filtered is None or df_filtered.height == 0:
-        st.warning(f"No images found for fish type: {fish_type}")
+        st.warning("No images found for selected fish types")
         return
 
     all_image_names = df_filtered["name"].to_list()
 
-    st.info(
-        f"Showing {len(all_image_names)} images"
-        + (f" for fish type: {fish_type}" if fish_type != "All" else "")
-    )
+    st.info(f"Showing {len(all_image_names)} images for {len(fish_types)} fish type(s)")
 
     # Image Selector
     col1, col2 = st.columns([3, 1])
@@ -729,15 +735,20 @@ def main():
         ],
     )
 
-    # Fish type selector (for relevant modes)
+    # Fish type selector (for relevant modes) - multiselect
     if mode in ["Data Explorer", "Model Overview", "Detailed Analysis"]:
         st.sidebar.markdown("---")
-        fish_type = st.sidebar.selectbox(
-            "Fish Type",
-            ["All"] + fish_types,
+        selected_fish_types = st.sidebar.multiselect(
+            "Fish Types (leave empty for all)",
+            fish_types,
+            default=[],
+            help="Select one or more fish types to filter. Leave empty to show all.",
         )
+        # If empty, use all fish types
+        if not selected_fish_types:
+            selected_fish_types = fish_types
     else:
-        fish_type = "All"
+        selected_fish_types = fish_types
 
     # Depth model selector (for Data Explorer)
     depth_model = None
@@ -746,13 +757,13 @@ def main():
 
     # Render selected view
     if mode == "Data Explorer":
-        render_data_explorer(df_meta, fish_type, depth_model)
+        render_data_explorer(df_meta, selected_fish_types, depth_model)
     elif mode == "Model Overview":
-        render_overview(df_meta, fish_type, pred_files)
+        render_overview(df_meta, selected_fish_types, pred_files)
     elif mode == "Fish Type Comparison":
         render_comparison_by_fish_type(df_meta, pred_files)
     elif mode == "Detailed Analysis":
-        render_detailed_analysis(df_meta, fish_type, pred_files)
+        render_detailed_analysis(df_meta, selected_fish_types, pred_files)
     elif mode == "Model x Fish Type Heatmap":
         render_multi_model_fish_type(df_meta, pred_files)
 

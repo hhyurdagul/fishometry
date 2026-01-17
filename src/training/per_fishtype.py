@@ -1,11 +1,12 @@
 """
 Per-Fish-Type Training Script
 
-Trains Linear Regression, XGBoost, and MLP models for each fish_type separately,
+Trains Linear Regression, XGBoost, MLP, and CNN models for each fish_type separately,
 plus generates merged predictions combining per-type model outputs.
 
 Usage:
     python -m src.training.per_fishtype --dataset data-outside --feature-set scaled --depth --epochs 200
+    python -m src.training.per_fishtype --dataset data-outside --feature-set scaled --depth --epochs 200 --cnn --cnn-epochs 100
 """
 
 import argparse
@@ -15,7 +16,9 @@ import polars as pl
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+from torchvision import models, transforms
+from PIL import Image
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -25,6 +28,7 @@ import joblib
 
 from src.training.data_loader import load_data, get_feature_description
 from src.training.mlp import FishMLP, TabularDataset
+from src.training.cnn import FishModel
 
 
 MIN_SAMPLES_WARNING = 30
@@ -384,6 +388,206 @@ def train_mlp_model(
     return results
 
 
+class FishDatasetFiltered(Dataset):
+    """Dataset for fish images filtered by fish_type."""
+
+    def __init__(self, X, y, names, img_dir, transform=None):
+        self.X = X
+        self.y = y
+        self.names = names
+        self.img_dir = img_dir
+        self.transform = transform
+
+        # Filter to only existing images
+        valid_indices = []
+        for i, name in enumerate(self.names):
+            if os.path.exists(os.path.join(img_dir, name)):
+                valid_indices.append(i)
+
+        self.X = self.X[valid_indices] if len(self.X) > 0 else np.array([])
+        self.y = self.y[valid_indices] if len(self.y) > 0 else np.array([])
+        self.names = [self.names[i] for i in valid_indices]
+
+    def __len__(self):
+        return len(self.names)
+
+    def __getitem__(self, idx):
+        img_name = self.names[idx]
+        length = self.y[idx]
+        aux = self.X[idx]
+
+        img_path = os.path.join(self.img_dir, img_name)
+        image = Image.open(img_path).convert("RGB")
+
+        if self.transform:
+            image = self.transform(image)
+
+        return (
+            image,
+            torch.tensor(aux, dtype=torch.float32),
+            torch.tensor(length, dtype=torch.float32),
+            img_name,
+        )
+
+
+def train_cnn_model(
+    X_train,
+    y_train,
+    X_val,
+    y_val,
+    X_test,
+    y_test,
+    names_train,
+    names_val,
+    names_test,
+    dataset_name,
+    feature_desc,
+    fish_type=None,
+    epochs=100,
+):
+    """Train CNN model for a specific fish type."""
+    suffix = f"_{fish_type}" if fish_type else ""
+    model_name = f"cnn{suffix}_{feature_desc}"
+
+    if len(X_train) == 0:
+        print(f"  [CNN] No training samples for {fish_type or 'all'}")
+        return None
+
+    base_dir = f"data/{dataset_name}/processed"
+    img_dir = os.path.join(base_dir, "blackout")
+
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
+    # Create datasets with pre-filtered data
+    train_set = FishDatasetFiltered(X_train, y_train, names_train, img_dir, transform)
+    val_set = (
+        FishDatasetFiltered(X_val, y_val, names_val, img_dir, transform)
+        if len(X_val) > 0
+        else None
+    )
+    test_set = (
+        FishDatasetFiltered(X_test, y_test, names_test, img_dir, transform)
+        if len(X_test) > 0
+        else None
+    )
+
+    if len(train_set) == 0:
+        print(f"  [CNN] No valid training images for {fish_type or 'all'}")
+        return None
+
+    batch_size = min(16, len(train_set))
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = (
+        DataLoader(val_set, batch_size=batch_size)
+        if val_set and len(val_set) > 0
+        else None
+    )
+    test_loader = (
+        DataLoader(test_set, batch_size=batch_size)
+        if test_set and len(test_set) > 0
+        else None
+    )
+
+    # Model
+    aux_size = X_train.shape[1] if len(X_train) > 0 else 0
+    model = FishModel(aux_size=aux_size)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+    # Save paths
+    model_dir = os.path.join("checkpoints", dataset_name)
+    os.makedirs(model_dir, exist_ok=True)
+    save_path = os.path.join(model_dir, f"{model_name}.pth")
+
+    best_mape = float("inf")
+
+    for epoch in range(epochs):
+        model.train()
+        for imgs, aux, lbls, _ in train_loader:
+            imgs, aux, lbls = imgs.to(device), aux.to(device), lbls.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(imgs, aux).flatten()
+            loss = criterion(outputs, lbls)
+            loss.backward()
+            optimizer.step()
+
+        # Validation
+        if val_loader:
+            model.eval()
+            val_preds, val_targets = [], []
+            with torch.no_grad():
+                for imgs, aux, lbls, _ in val_loader:
+                    imgs, aux = imgs.to(device), aux.to(device)
+                    outputs = model(imgs, aux).flatten()
+                    val_preds.extend(outputs.cpu().numpy())
+                    val_targets.extend(lbls.numpy())
+
+            if val_targets:
+                val_mape = mean_absolute_percentage_error(val_targets, val_preds)
+                if val_mape < best_mape:
+                    best_mape = val_mape
+                    torch.save(model.state_dict(), save_path)
+
+    # Load best model
+    if os.path.exists(save_path):
+        model.load_state_dict(torch.load(save_path, weights_only=True))
+    model.eval()
+
+    # Save predictions
+    pred_dir = os.path.join("data", dataset_name, "predictions")
+    os.makedirs(pred_dir, exist_ok=True)
+
+    results = {}
+    for split_name, loader in [
+        ("train", train_loader),
+        ("val", val_loader),
+        ("test", test_loader),
+    ]:
+        if not loader:
+            continue
+
+        preds, targets, batch_names = [], [], []
+        with torch.no_grad():
+            for imgs, aux, lbls, img_names in loader:
+                imgs, aux = imgs.to(device), aux.to(device)
+                outputs = model(imgs, aux).flatten()
+                preds.extend(outputs.cpu().numpy())
+                targets.extend(lbls.numpy())
+                batch_names.extend(img_names)
+
+        mape = mean_absolute_percentage_error(targets, preds)
+
+        df = pl.DataFrame(
+            {
+                "name": batch_names,
+                "gt_length": np.round(targets, 1),
+                "pred_length": np.round(preds, 1),
+            }
+        )
+
+        # Only save individual predictions for non-fish-type-specific models
+        if fish_type is None:
+            filename = f"cnn{suffix}_{feature_desc}_{split_name}.csv"
+            df.write_csv(os.path.join(pred_dir, filename))
+        results[split_name] = {"mape": mape, "predictions": df}
+
+    if "val" in results:
+        print(f"  [CNN] {fish_type or 'all'}: Val MAPE = {results['val']['mape']:.4f}")
+
+    return results
+
+
 def generate_merged_predictions(
     dataset_name, feature_desc, fish_types, model_type, all_results
 ):
@@ -425,7 +629,13 @@ def generate_merged_predictions(
 
 
 def train_per_fishtype(
-    dataset_name, feature_sets, depth_model=None, include_stats=False, epochs=200
+    dataset_name,
+    feature_sets,
+    depth_model=None,
+    include_stats=False,
+    epochs=200,
+    cnn_epochs=100,
+    include_cnn=False,
 ):
     """Main function to train models per fish type."""
     feature_desc = get_feature_description(feature_sets, depth_model, include_stats)
@@ -456,56 +666,11 @@ def train_per_fishtype(
         print(f"Error loading data: {e}")
         return
 
-    # Train on ALL data first
-    print("\n--- Training on ALL data ---")
-    train_linear_regression(
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        X_test,
-        y_test,
-        names_train,
-        names_val,
-        names_test,
-        dataset_name,
-        feature_desc,
-        fish_type=None,
-    )
-    train_xgboost_model(
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        X_test,
-        y_test,
-        names_train,
-        names_val,
-        names_test,
-        dataset_name,
-        feature_desc,
-        fish_type=None,
-    )
-    train_mlp_model(
-        X_train,
-        y_train,
-        X_val,
-        y_val,
-        X_test,
-        y_test,
-        names_train,
-        names_val,
-        names_test,
-        dataset_name,
-        feature_desc,
-        fish_type=None,
-        epochs=epochs,
-    )
-
     # Train per fish type and collect results
     linear_results = {}
     xgboost_results = {}
     mlp_results = {}
+    cnn_results = {}
 
     for fish_type in fish_types:
         print(f"\n--- Training for: {fish_type} ---")
@@ -534,61 +699,81 @@ def train_per_fishtype(
             print(f"  SKIPPING: Not enough training samples ({len(X_train_ft)} < 5)")
             continue
 
-        linear_results[fish_type] = train_linear_regression(
-            X_train_ft,
-            y_train_ft,
-            X_val_ft,
-            y_val_ft,
-            X_test_ft,
-            y_test_ft,
-            names_train_ft,
-            names_val_ft,
-            names_test_ft,
-            dataset_name,
-            feature_desc,
-            fish_type=fish_type,
+    #     linear_results[fish_type] = train_linear_regression(
+    #         X_train_ft,
+    #         y_train_ft,
+    #         X_val_ft,
+    #         y_val_ft,
+    #         X_test_ft,
+    #         y_test_ft,
+    #         names_train_ft,
+    #         names_val_ft,
+    #         names_test_ft,
+    #         dataset_name,
+    #         feature_desc,
+    #         fish_type=fish_type,
+    #     )
+    #     xgboost_results[fish_type] = train_xgboost_model(
+    #         X_train_ft,
+    #         y_train_ft,
+    #         X_val_ft,
+    #         y_val_ft,
+    #         X_test_ft,
+    #         y_test_ft,
+    #         names_train_ft,
+    #         names_val_ft,
+    #         names_test_ft,
+    #         dataset_name,
+    #         feature_desc,
+    #         fish_type=fish_type,
+    #     )
+    #     mlp_results[fish_type] = train_mlp_model(
+    #         X_train_ft,
+    #         y_train_ft,
+    #         X_val_ft,
+    #         y_val_ft,
+    #         X_test_ft,
+    #         y_test_ft,
+    #         names_train_ft,
+    #         names_val_ft,
+    #         names_test_ft,
+    #         dataset_name,
+    #         feature_desc,
+    #         fish_type=fish_type,
+    #         epochs=epochs,
+    #     )
+        if include_cnn:
+            cnn_results[fish_type] = train_cnn_model(
+                X_train_ft,
+                y_train_ft,
+                X_val_ft,
+                y_val_ft,
+                X_test_ft,
+                y_test_ft,
+                names_train_ft,
+                names_val_ft,
+                names_test_ft,
+                dataset_name,
+                feature_desc,
+                fish_type=fish_type,
+                epochs=cnn_epochs,
+            )
+    #
+    # # Generate merged predictions
+    # print(f"\n--- Generating Merged Predictions ---")
+    # generate_merged_predictions(
+    #     dataset_name, feature_desc, fish_types, "linear", linear_results
+    # )
+    # generate_merged_predictions(
+    #     dataset_name, feature_desc, fish_types, "xgboost", xgboost_results
+    # )
+    # generate_merged_predictions(
+    #     dataset_name, feature_desc, fish_types, "mlp", mlp_results
+    # )
+    if include_cnn:
+        generate_merged_predictions(
+            dataset_name, feature_desc, fish_types, "cnn", cnn_results
         )
-        xgboost_results[fish_type] = train_xgboost_model(
-            X_train_ft,
-            y_train_ft,
-            X_val_ft,
-            y_val_ft,
-            X_test_ft,
-            y_test_ft,
-            names_train_ft,
-            names_val_ft,
-            names_test_ft,
-            dataset_name,
-            feature_desc,
-            fish_type=fish_type,
-        )
-        mlp_results[fish_type] = train_mlp_model(
-            X_train_ft,
-            y_train_ft,
-            X_val_ft,
-            y_val_ft,
-            X_test_ft,
-            y_test_ft,
-            names_train_ft,
-            names_val_ft,
-            names_test_ft,
-            dataset_name,
-            feature_desc,
-            fish_type=fish_type,
-            epochs=epochs,
-        )
-
-    # Generate merged predictions
-    print(f"\n--- Generating Merged Predictions ---")
-    generate_merged_predictions(
-        dataset_name, feature_desc, fish_types, "linear", linear_results
-    )
-    generate_merged_predictions(
-        dataset_name, feature_desc, fish_types, "xgboost", xgboost_results
-    )
-    generate_merged_predictions(
-        dataset_name, feature_desc, fish_types, "mlp", mlp_results
-    )
 
     print(f"\n{'=' * 60}")
     print("Training complete!")
@@ -611,8 +796,12 @@ def main():
     parser.add_argument(
         "--stats", action="store_true", help="Include species stats features"
     )
+    parser.add_argument("--cnn", action="store_true", help="Include CNN model training")
     parser.add_argument(
         "--epochs", type=int, default=200, help="Number of epochs for MLP"
+    )
+    parser.add_argument(
+        "--cnn-epochs", type=int, default=100, help="Number of epochs for CNN"
     )
     args = parser.parse_args()
 
@@ -622,6 +811,8 @@ def main():
         depth_model="depth" if args.depth else None,
         include_stats=args.stats,
         epochs=args.epochs,
+        cnn_epochs=args.cnn_epochs,
+        include_cnn=args.cnn,
     )
 
 
