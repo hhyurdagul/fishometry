@@ -34,7 +34,7 @@ def render_explorer(dataset, df_meta, all_image_names, depth_model):
         row_data["Predictions"] = preds
 
     # Process Images
-    img_raw, img_rot, img_depth, img_seg = process_images(
+    img_raw, img_rot, img_depth, img_blackout = process_images(
         dataset, selected_img, row_data, depth_model
     )
 
@@ -63,11 +63,11 @@ def render_explorer(dataset, df_meta, all_image_names, depth_model):
             st.info("No depth map found")
 
     with c4:
-        st.markdown("### Segmentation Overlay")
-        if img_seg is not None:
-            st.image(img_seg, width="stretch")
+        st.markdown("### Blackout")
+        if img_blackout is not None:
+            st.image(img_blackout, width="stretch")
         else:
-            st.info("No segmentation found")
+            st.info("No blackout image found")
 
     # Metadata Expander
     with st.expander("See Metadata JSON", expanded=True):

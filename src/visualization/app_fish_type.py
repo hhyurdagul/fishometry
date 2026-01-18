@@ -124,12 +124,23 @@ def get_image_paths(image_name, depth_model=None):
     if not os.path.exists(seg_path):
         seg_path = f"data/{DATASET}/processed/segment/{image_name}.npy"
 
-    return found_path, rot_path, depth_path, seg_path
+    # Blackout image path
+    blackout_path = f"data/{DATASET}/processed/blackout/{image_name}"
+    if not os.path.exists(blackout_path):
+        for ext in [".jpg", ".jpeg", ".png"]:
+            alt_path = f"data/{DATASET}/processed/blackout/{image_name.replace('.jpg', ext).replace('.jpeg', ext)}"
+            if os.path.exists(alt_path):
+                blackout_path = alt_path
+                break
+
+    return found_path, rot_path, depth_path, blackout_path
 
 
 def process_images(image_name, data_row, depth_model=None):
     """Load and process all image variants for display."""
-    raw_path, rot_path, depth_path, seg_path = get_image_paths(image_name, depth_model)
+    raw_path, rot_path, depth_path, blackout_path = get_image_paths(
+        image_name, depth_model
+    )
 
     img_raw = None
     if raw_path and os.path.exists(raw_path):
@@ -177,18 +188,13 @@ def process_images(image_name, data_row, depth_model=None):
         img_depth = cv2.applyColorMap(norm_depth, cv2.COLORMAP_MAGMA)
         img_depth = cv2.cvtColor(img_depth, cv2.COLOR_BGR2RGB)
 
-    img_seg = None
-    if seg_path and os.path.exists(seg_path):
-        mask = np.load(seg_path)
-        if img_rot is not None:
-            overlay = img_rot.copy()
-            overlay[mask > 0] = [0, 255, 0]
-            img_seg = cv2.addWeighted(img_rot, 0.7, overlay, 0.3, 0)
-        else:
-            img_seg = (mask * 255).astype(np.uint8)
-            img_seg = cv2.cvtColor(img_seg, cv2.COLOR_GRAY2RGB)
+    # Blackout image
+    img_blackout = None
+    if blackout_path and os.path.exists(blackout_path):
+        img_blackout = cv2.imread(blackout_path)
+        img_blackout = cv2.cvtColor(img_blackout, cv2.COLOR_BGR2RGB)
 
-    return img_raw, img_rot, img_depth, img_seg
+    return img_raw, img_rot, img_depth, img_blackout
 
 
 def calculate_metrics(df):
@@ -661,7 +667,7 @@ def render_data_explorer(df_meta, fish_types, depth_model):
         row_data["Predictions"] = preds
 
     # Process Images
-    img_raw, img_rot, img_depth, img_seg = process_images(
+    img_raw, img_rot, img_depth, img_blackout = process_images(
         selected_img, row_data, depth_model
     )
 
@@ -690,11 +696,11 @@ def render_data_explorer(df_meta, fish_types, depth_model):
             st.info("No depth map found")
 
     with c4:
-        st.markdown("### Segmentation Overlay")
-        if img_seg is not None:
-            st.image(img_seg, width="stretch")
+        st.markdown("### Blackout")
+        if img_blackout is not None:
+            st.image(img_blackout, width="stretch")
         else:
-            st.info("No segmentation found")
+            st.info("No blackout image found")
 
     # Metadata Expander
     with st.expander("See Metadata JSON", expanded=True):

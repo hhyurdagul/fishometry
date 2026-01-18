@@ -6,7 +6,7 @@ import numpy as np
 
 
 def get_image_paths(dataset, image_name, depth_model=None):
-    """Resolve paths for raw, rotated, depth, and segmentation images."""
+    """Resolve paths for raw, rotated, depth, and blackout images."""
     # Try finding image in raw or splits
     found_path = None
     possible_paths = [
@@ -40,17 +40,22 @@ def get_image_paths(dataset, image_name, depth_model=None):
         if os.path.exists(p):
             depth_path = p
 
-    # Segment extension check
-    seg_path = f"data/{dataset}/processed/segment/{image_name.replace('.jpg', '.npy').replace('.jpeg', '.npy')}"
-    if not os.path.exists(seg_path):
-        seg_path = f"data/{dataset}/processed/segment/{image_name}.npy"
+    # Blackout image path
+    blackout_path = f"data/{dataset}/processed/blackout/{image_name}"
+    if not os.path.exists(blackout_path):
+        # Try with different extensions
+        for ext in [".jpg", ".jpeg", ".png"]:
+            alt_path = f"data/{dataset}/processed/blackout/{image_name.replace('.jpg', ext).replace('.jpeg', ext)}"
+            if os.path.exists(alt_path):
+                blackout_path = alt_path
+                break
 
-    return found_path, rot_path, depth_path, seg_path
+    return found_path, rot_path, depth_path, blackout_path
 
 
 def process_images(dataset, image_name, data_row, depth_model=None):
     """Load and process all image variants for display."""
-    raw_path, rot_path, depth_path, seg_path = get_image_paths(
+    raw_path, rot_path, depth_path, blackout_path = get_image_paths(
         dataset, image_name, depth_model
     )
 
@@ -106,16 +111,10 @@ def process_images(dataset, image_name, data_row, depth_model=None):
         img_depth = cv2.applyColorMap(norm_depth, cv2.COLORMAP_MAGMA)
         img_depth = cv2.cvtColor(img_depth, cv2.COLOR_BGR2RGB)
 
-    # Segmentation overlay
-    img_seg = None
-    if seg_path and os.path.exists(seg_path):
-        mask = np.load(seg_path)
-        if img_rot is not None:
-            overlay = img_rot.copy()
-            overlay[mask > 0] = [0, 255, 0]
-            img_seg = cv2.addWeighted(img_rot, 0.7, overlay, 0.3, 0)
-        else:
-            img_seg = (mask * 255).astype(np.uint8)
-            img_seg = cv2.cvtColor(img_seg, cv2.COLOR_GRAY2RGB)
+    # Blackout image
+    img_blackout = None
+    if blackout_path and os.path.exists(blackout_path):
+        img_blackout = cv2.imread(blackout_path)
+        img_blackout = cv2.cvtColor(img_blackout, cv2.COLOR_BGR2RGB)
 
-    return img_raw, img_rot, img_depth, img_seg
+    return img_raw, img_rot, img_depth, img_blackout
