@@ -511,7 +511,7 @@ def render_detailed_analysis(df_meta, fish_types, pred_files):
 
     df_sorted = df_filtered.sort("mape", descending=True).select(
         ["name", "gt_length", "pred_length", "abs_error", "mape"]
-    )
+    ).with_columns(pl.selectors.numeric().round(3))
 
     st.dataframe(df_sorted, width="stretch", hide_index=True)
 

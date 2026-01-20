@@ -73,7 +73,7 @@ def render_comparison(dataset):
         st.warning("Could not extract metrics from files.")
         return
 
-    df_res = pl.DataFrame(results).sort("MAPE (%)")
+    df_res = pl.DataFrame(results).sort("MAPE (%)").with_columns(pl.selectors.numeric().round(3))
 
     st.subheader("Leaderboard")
     st.dataframe(df_res, width="stretch", hide_index=True)

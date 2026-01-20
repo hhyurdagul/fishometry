@@ -86,7 +86,7 @@ def render_analysis(dataset, df_meta, all_image_names, depth_model):
     st.dataframe(
         df_sorted.select(
             ["name", "gt_length", "pred_length", "abs_error", "pct_error"]
-        ),
+        ).with_columns(pl.selectors.numeric().round(3)),
         width="stretch",
         hide_index=True,
     )
