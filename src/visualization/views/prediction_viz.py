@@ -239,7 +239,7 @@ def render_prediction_viz(dataset):
             color=alt.Color("MAPE:Q", scale=alt.Scale(scheme="reds"), legend=None),
             tooltip=["Range", "MAPE", "Std", "Count"],
         )
-        .properties(width=600, height=350, title="MAPE by Length Range")
+        .properties(width=600, height=400, title="MAPE by Length Range")
     )
 
     st.altair_chart(bin_chart, width="stretch")

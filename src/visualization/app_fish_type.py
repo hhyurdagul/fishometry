@@ -57,6 +57,22 @@ def load_predictions_list():
 
 
 @st.cache_data
+def get_model_names(pred_files, split=None):
+    """Extract unique model names from prediction files."""
+    models = set()
+    for f in pred_files:
+        basename = os.path.basename(f)
+        # Remove split suffix if present
+        for s in ["_train.csv", "_val.csv", "_test.csv"]:
+            if basename.endswith(s):
+                models.add(basename.replace(s, ""))
+                break
+        else:
+            models.add(basename.replace(".csv", ""))
+    return sorted(list(models))
+
+
+@st.cache_data
 def load_prediction_df(file_path):
     """Load a single prediction CSV file."""
     return pl.read_csv(file_path)
@@ -216,7 +232,7 @@ def calculate_metrics(df):
 
 
 # --- Views ---
-def render_overview(df_meta, fish_types, pred_files):
+def render_overview(df_meta, fish_types, pred_files, selected_models=None):
     """Overview of all models for selected fish type(s)."""
     fish_label = (
         ", ".join(fish_types) if len(fish_types) <= 3 else f"{len(fish_types)} types"
@@ -230,6 +246,15 @@ def render_overview(df_meta, fish_types, pred_files):
     # Select split
     split_choice = st.selectbox("Select Split", ["val", "test", "train"])
     relevant_files = [f for f in pred_files if f.endswith(f"_{split_choice}.csv")]
+
+    # Filter by selected models
+    if selected_models:
+        relevant_files = [
+            f
+            for f in relevant_files
+            if os.path.basename(f).replace(f"_{split_choice}.csv", "")
+            in selected_models
+        ]
 
     if not relevant_files:
         st.info(f"No prediction files found for split '{split_choice}'")
@@ -509,14 +534,16 @@ def render_detailed_analysis(df_meta, fish_types, pred_files):
     # Sorted table
     st.subheader("Samples Sorted by Error")
 
-    df_sorted = df_filtered.sort("mape", descending=True).select(
-        ["name", "gt_length", "pred_length", "abs_error", "mape"]
-    ).with_columns(pl.selectors.numeric().round(3))
+    df_sorted = (
+        df_filtered.sort("mape", descending=True)
+        .select(["name", "gt_length", "pred_length", "abs_error", "mape"])
+        .with_columns(pl.selectors.numeric().round(3))
+    )
 
     st.dataframe(df_sorted, width="stretch", hide_index=True)
 
 
-def render_multi_model_fish_type(df_meta, pred_files):
+def render_multi_model_fish_type(df_meta, pred_files, selected_models=None):
     """Compare multiple models across fish types in a heatmap."""
     st.header("Model x Fish Type Heatmap")
 
@@ -527,6 +554,15 @@ def render_multi_model_fish_type(df_meta, pred_files):
     # Select split
     split_choice = st.selectbox("Select Split", ["val", "test", "train"])
     relevant_files = [f for f in pred_files if f.endswith(f"_{split_choice}.csv")]
+
+    # Filter by selected models
+    if selected_models:
+        relevant_files = [
+            f
+            for f in relevant_files
+            if os.path.basename(f).replace(f"_{split_choice}.csv", "")
+            in selected_models
+        ]
 
     if not relevant_files:
         st.info(f"No prediction files found for split '{split_choice}'")
@@ -707,6 +743,150 @@ def render_data_explorer(df_meta, fish_types, depth_model):
         st.json(row_data)
 
 
+def render_fish_stats(df_meta):
+    """Show fish statistics from train dataset grouped by fish type."""
+    st.header("Fish Statistics (Train Dataset)")
+
+    # Filter to train split only
+    df_train = df_meta.filter(pl.col("split") == "train")
+
+    if df_train.height == 0:
+        st.warning("No training data found.")
+        return
+
+    if "length" not in df_train.columns:
+        st.error("No 'length' column found in metadata.")
+        return
+
+    # Overall stats
+    st.subheader("Overall Statistics")
+    lengths = df_train["length"].to_numpy()
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Count", len(lengths))
+    col2.metric("Mean", f"{np.mean(lengths):.2f}")
+    col3.metric("Median", f"{np.median(lengths):.2f}")
+    col4.metric("Std", f"{np.std(lengths):.2f}")
+    col5.metric("Range", f"{np.min(lengths):.1f} - {np.max(lengths):.1f}")
+
+    st.markdown("---")
+
+    # Per fish type stats
+    st.subheader("Statistics by Fish Type")
+
+    stats_data = []
+    fish_types = sorted(df_train["fish_type"].unique().to_list())
+
+    for ft in fish_types:
+        ft_data = df_train.filter(pl.col("fish_type") == ft)["length"].to_numpy()
+        if len(ft_data) > 0:
+            stats_data.append(
+                {
+                    "Fish Type": ft,
+                    "Count": len(ft_data),
+                    "Mean": round(float(np.mean(ft_data)), 2),
+                    "Median": round(float(np.median(ft_data)), 2),
+                    "Std": round(float(np.std(ft_data)), 2),
+                    "Min": round(float(np.min(ft_data)), 2),
+                    "Max": round(float(np.max(ft_data)), 2),
+                    "Range": round(float(np.max(ft_data) - np.min(ft_data)), 2),
+                }
+            )
+
+    if not stats_data:
+        st.warning("No statistics available.")
+        return
+
+    stats_df = pd.DataFrame(stats_data)
+    st.dataframe(stats_df, width="stretch", hide_index=True)
+
+    st.markdown("---")
+
+    # Visualizations
+    st.subheader("Visualizations")
+
+    viz_tab1, viz_tab2, viz_tab3 = st.tabs(["Distribution", "Box Plot", "Sample Count"])
+
+    with viz_tab1:
+        # Length distribution by fish type
+        train_pd = df_train.select(["fish_type", "length"]).to_pandas()
+
+        hist = (
+            alt.Chart(train_pd)
+            .mark_bar(opacity=0.7)
+            .encode(
+                x=alt.X("length:Q", bin=alt.Bin(maxbins=30), title="Length"),
+                y=alt.Y("count()", title="Count"),
+                color=alt.Color("fish_type:N", legend=alt.Legend(title="Fish Type")),
+            )
+            .properties(height=400)
+        )
+        st.altair_chart(hist, width="stretch")
+
+    with viz_tab2:
+        # Box plot by fish type
+        train_pd = df_train.select(["fish_type", "length"]).to_pandas()
+
+        boxplot = (
+            alt.Chart(train_pd)
+            .mark_boxplot(extent="min-max")
+            .encode(
+                x=alt.X("fish_type:N", title="Fish Type", sort="-y"),
+                y=alt.Y("length:Q", title="Length"),
+                color=alt.Color("fish_type:N", legend=None),
+            )
+            .properties(height=400)
+        )
+        st.altair_chart(boxplot, width="stretch")
+
+    with viz_tab3:
+        # Sample count bar chart
+        count_chart = (
+            alt.Chart(stats_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("Fish Type:N", sort="-y"),
+                y=alt.Y("Count:Q"),
+                color=alt.Color(
+                    "Count:Q", scale=alt.Scale(scheme="blues"), legend=None
+                ),
+                tooltip=["Fish Type", "Count", "Mean", "Std"],
+            )
+            .properties(height=400)
+        )
+        st.altair_chart(count_chart, width="stretch")
+
+    st.markdown("---")
+
+    # Mean length comparison
+    st.subheader("Mean Length by Fish Type")
+
+    mean_chart = (
+        alt.Chart(stats_df)
+        .mark_bar()
+        .encode(
+            x=alt.X("Fish Type:N", sort="-y"),
+            y=alt.Y("Mean:Q", title="Mean Length"),
+            color=alt.Color("Mean:Q", scale=alt.Scale(scheme="greens"), legend=None),
+            tooltip=["Fish Type", "Mean", "Std", "Min", "Max", "Count"],
+        )
+        .properties(height=400)
+    )
+
+    # Add error bars for std
+    error_bars = (
+        alt.Chart(stats_df)
+        .mark_errorbar()
+        .encode(
+            x=alt.X("Fish Type:N", sort="-y"),
+            y=alt.Y("Min:Q", title="Length"),
+            y2=alt.Y2("Max:Q"),
+        )
+    )
+
+    st.altair_chart(mean_chart, width="stretch")
+
+
 # --- Main ---
 def main():
     st.sidebar.title("Fish Type Analysis")
@@ -726,6 +906,7 @@ def main():
     fish_types = get_fish_types(df_meta)
     pred_files = load_predictions_list()
     depth_models = get_depth_models()
+    all_models = get_model_names(pred_files)
 
     st.sidebar.markdown("---")
 
@@ -733,6 +914,7 @@ def main():
     mode = st.sidebar.radio(
         "View",
         [
+            "Fish Statistics",
             "Data Explorer",
             "Model Overview",
             "Fish Type Comparison",
@@ -756,22 +938,38 @@ def main():
     else:
         selected_fish_types = fish_types
 
+    # Model selector (for relevant modes) - multiselect
+    selected_models = None
+    if mode in ["Model Overview", "Model x Fish Type Heatmap"]:
+        st.sidebar.markdown("---")
+        selected_models = st.sidebar.multiselect(
+            "Models (leave empty for all)",
+            all_models,
+            default=[],
+            help="Select one or more models to filter. Leave empty to show all.",
+        )
+        # If empty, use all models
+        if not selected_models:
+            selected_models = None  # None means all models
+
     # Depth model selector (for Data Explorer)
     depth_model = None
     if mode == "Data Explorer" and depth_models:
         depth_model = st.sidebar.selectbox("Depth Model", depth_models)
 
     # Render selected view
-    if mode == "Data Explorer":
+    if mode == "Fish Statistics":
+        render_fish_stats(df_meta)
+    elif mode == "Data Explorer":
         render_data_explorer(df_meta, selected_fish_types, depth_model)
     elif mode == "Model Overview":
-        render_overview(df_meta, selected_fish_types, pred_files)
+        render_overview(df_meta, selected_fish_types, pred_files, selected_models)
     elif mode == "Fish Type Comparison":
         render_comparison_by_fish_type(df_meta, pred_files)
     elif mode == "Detailed Analysis":
         render_detailed_analysis(df_meta, selected_fish_types, pred_files)
     elif mode == "Model x Fish Type Heatmap":
-        render_multi_model_fish_type(df_meta, pred_files)
+        render_multi_model_fish_type(df_meta, pred_files, selected_models)
 
 
 if __name__ == "__main__":
