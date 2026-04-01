@@ -1,12 +1,7 @@
 import cv2
 import os
-import sys
-import random
 
-# Add src to path
-sys.path.append(os.getcwd())
-
-from src.utils.zoom import augment_zoom
+from src.create_data.augment import augment_zoom
 
 def verify_on_real_data():
     input_dir = "data/data-inside/raw"

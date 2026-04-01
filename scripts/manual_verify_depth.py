@@ -1,10 +1,9 @@
-
 import os
-import sys
 import polars as pl
+
 from src.utils.io import load_config
-from src.steps.yolo_step import YoloStep
-from src.steps.depth_step import DepthStep
+from src.preprocessing.steps.yolo import YoloStep
+from src.preprocessing.steps.depth import DepthStep
 
 # Setup basics
 config = load_config("configs/config_inside.yaml")
@@ -30,10 +29,8 @@ print(result_df)
 # Check folders
 output_dir = depth_step.output_dir
 print(f"\nChecking outputs in {output_dir}:")
-for model in ["v3", "v2", "pro"]:
-    model_dir = os.path.join(output_dir, f"depth-{model}")
+for model in os.listdir(output_dir) if os.path.exists(output_dir) else []:
+    model_dir = os.path.join(output_dir, model)
     if os.path.exists(model_dir):
         files = os.listdir(model_dir)
         print(f"  {model}: {len(files)} files found. {files}")
-    else:
-        print(f"  {model}: Folder missing!")
