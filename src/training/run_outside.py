@@ -15,11 +15,9 @@ import subprocess
 DATASET = "data-outside"
 
 
-def run_pipeline(pipeline_id, stats=False, cnn=False):
+def run_pipeline(pipeline_id, cnn=False):
     """Run a specific pipeline configuration."""
-    stats_flag = ["--stats"] if stats else []
     cnn_flag = ["--cnn", "--cnn-epochs", "100"] if cnn else []
-    stats_desc = " with stats" if stats else ""
     cnn_desc = " +CNN" if cnn else ""
 
     # Pipeline 0: Baseline
@@ -28,9 +26,9 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
         cmd = [sys.executable, "-m", "src.training.baseline", "--dataset", DATASET]
         subprocess.run(cmd, check=True)
 
-    # Pipeline 1: coords features (Linear, XGBoost, MLP)
+    # Pipeline 1: Fish coordinates as features (Linear, XGBoost, MLP)
     elif pipeline_id == 1:
-        print(f"\n>>> Pipeline 1: coords features{stats_desc} <<<")
+        print(f"\n>>> Pipeline 1: Fish coordinates as features <<<")
         for module in [
             "src.training.linear",
             "src.training.xgboost",
@@ -44,35 +42,14 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 DATASET,
                 "--feature-set",
                 "coords",
-            ] + stats_flag
+            ]
             if module == "src.training.mlp":
                 cmd.extend(["--epochs", "200"])
             subprocess.run(cmd, check=True)
 
-    # Pipeline 2: eye features (Linear, XGBoost, MLP)
+    # Pipeline 2: Scaled fish coordinates as features (Linear, XGBoost, MLP)
     elif pipeline_id == 2:
-        print(f"\n>>> Pipeline 2: eye features{stats_desc} <<<")
-        for module in [
-            "src.training.linear",
-            "src.training.xgboost",
-            "src.training.mlp",
-        ]:
-            cmd = [
-                sys.executable,
-                "-m",
-                module,
-                "--dataset",
-                DATASET,
-                "--feature-set",
-                "eye",
-            ] + stats_flag
-            if module == "src.training.mlp":
-                cmd.extend(["--epochs", "200"])
-            subprocess.run(cmd, check=True)
-
-    # Pipeline 3: scaled features (Linear, XGBoost, MLP)
-    elif pipeline_id == 3:
-        print(f"\n>>> Pipeline 3: scaled features{stats_desc} <<<")
+        print(f"\n>>> Pipeline 2: Scaled fish coordinates as features <<<")
         for module in [
             "src.training.linear",
             "src.training.xgboost",
@@ -86,14 +63,14 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 DATASET,
                 "--feature-set",
                 "scaled",
-            ] + stats_flag
+            ]
             if module == "src.training.mlp":
                 cmd.extend(["--epochs", "200"])
             subprocess.run(cmd, check=True)
 
-    # Pipeline 4: coords + depth features (Linear, XGBoost, MLP)
-    elif pipeline_id == 4:
-        print(f"\n>>> Pipeline 4: coords + depth{stats_desc} <<<")
+    # Pipeline 3: Fish coordinates + fish depth as features (Linear, XGBoost, MLP)
+    elif pipeline_id == 3:
+        print(f"\n>>> Pipeline 3: Fish coordinates + fish depth as features <<<")
         for module in [
             "src.training.linear",
             "src.training.xgboost",
@@ -108,14 +85,14 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 "--feature-set",
                 "coords",
                 "--depth",
-            ] + stats_flag
+            ]
             if module == "src.training.mlp":
                 cmd.extend(["--epochs", "200"])
             subprocess.run(cmd, check=True)
 
-    # Pipeline 5: scaled + depth features (Linear, XGBoost, MLP)
-    elif pipeline_id == 5:
-        print(f"\n>>> Pipeline 5: scaled + depth{stats_desc} <<<")
+    # Pipeline 4: Scaled fish coordinates + fish depth as features (Linear, XGBoost, MLP)
+    elif pipeline_id == 4:
+        print(f"\n>>> Pipeline 4: Scaled fish coordinates + fish depth as features <<<")
         for module in [
             "src.training.linear",
             "src.training.xgboost",
@@ -130,14 +107,14 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 "--feature-set",
                 "scaled",
                 "--depth",
-            ] + stats_flag
+            ]
             if module == "src.training.mlp":
                 cmd.extend(["--epochs", "200"])
             subprocess.run(cmd, check=True)
 
-    # Pipeline 6: CNN with scaled + depth
-    elif pipeline_id == 6:
-        print(f"\n>>> Pipeline 6: CNN scaled + depth{stats_desc} <<<")
+    # Pipeline 5: CNN with scaled fish coordinates + fish depth as features
+    elif pipeline_id == 5:
+        print(f"\n>>> Pipeline 5: CNN scaled fish coordinates + fish depth as features <<<")
         cmd = [
             sys.executable,
             "-m",
@@ -149,12 +126,12 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
             "--depth",
             "--epochs",
             "100",
-        ] + stats_flag
+        ]
         subprocess.run(cmd, check=True)
 
-    # Pipeline 7: Per-fish-type with coords
-    elif pipeline_id == 7:
-        print(f"\n>>> Pipeline 7: Per-fish-type coords{stats_desc}{cnn_desc} <<<")
+    # Pipeline 6: Per-fish-type modeling using fish coordinates as features
+    elif pipeline_id == 6:
+        print(f"\n>>> Pipeline 6: Per-fish-type modeling using fish coordinates as features{cnn_desc} <<<")
         cmd = (
             [
                 sys.executable,
@@ -167,14 +144,13 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 "--epochs",
                 "200",
             ]
-            + stats_flag
             + cnn_flag
         )
         subprocess.run(cmd, check=True)
 
-    # Pipeline 8: Per-fish-type with scaled
-    elif pipeline_id == 8:
-        print(f"\n>>> Pipeline 8: Per-fish-type scaled{stats_desc}{cnn_desc} <<<")
+    # Pipeline 7: Per-fish-type using scaled fish coordinates as features
+    elif pipeline_id == 7:
+        print(f"\n>>> Pipeline 7: Per-fish-type using scaled fish coordinates as features{cnn_desc} <<<")
         cmd = (
             [
                 sys.executable,
@@ -187,38 +163,36 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 "--epochs",
                 "200",
             ]
-            + stats_flag
             + cnn_flag
         )
         subprocess.run(cmd, check=True)
 
-    # Pipeline 9: Per-fish-type with coords + depth
+    # Pipeline 8: Per-fish-type using fish coordinates + fish depth as features
+    elif pipeline_id == 8:
+        print(
+            f"\n>>> Pipeline 8: Per-fish-type using fish coordinates + fish depth as features{cnn_desc} <<<"
+        )
+        cmd = (
+            [
+                sys.executable,
+                "-m",
+                "src.training.per_fishtype",
+                "--dataset",
+                DATASET,
+                "--feature-set",
+                "coords",
+                "--depth",
+                "--epochs",
+                "200",
+            ]
+            + cnn_flag
+        )
+        subprocess.run(cmd, check=True)
+
+    # Pipeline 9: Per-fish-type using scaled fish coordinates + fish depth as features
     elif pipeline_id == 9:
         print(
-            f"\n>>> Pipeline 9: Per-fish-type coords + depth{stats_desc}{cnn_desc} <<<"
-        )
-        cmd = (
-            [
-                sys.executable,
-                "-m",
-                "src.training.per_fishtype",
-                "--dataset",
-                DATASET,
-                "--feature-set",
-                "coords",
-                "--depth",
-                "--epochs",
-                "200",
-            ]
-            + stats_flag
-            + cnn_flag
-        )
-        subprocess.run(cmd, check=True)
-
-    # Pipeline 10: Per-fish-type with scaled + depth
-    elif pipeline_id == 10:
-        print(
-            f"\n>>> Pipeline 10: Per-fish-type scaled + depth{stats_desc}{cnn_desc} <<<"
+            f"\n>>> Pipeline 9: Per-fish-type using scaled fish coordinates + fish depth as features{cnn_desc} <<<"
         )
         cmd = (
             [
@@ -233,7 +207,6 @@ def run_pipeline(pipeline_id, stats=False, cnn=False):
                 "--epochs",
                 "200",
             ]
-            + stats_flag
             + cnn_flag
         )
         subprocess.run(cmd, check=True)
@@ -249,18 +222,13 @@ def main():
     parser.add_argument(
         "--pipeline",
         type=int,
-        choices=list(range(11)),
-        help="Specific pipeline to run (0-10)",
-    )
-    parser.add_argument(
-        "--stats",
-        action="store_true",
-        help="Include species stats features",
+        choices=list(range(10)),
+        help="Specific pipeline to run (0-9)",
     )
     parser.add_argument(
         "--cnn",
         action="store_true",
-        help="Include CNN training for per-fishtype pipelines (7-10)",
+        help="Include CNN training for per-fishtype pipelines (6-9)",
     )
     parser.add_argument(
         "--all",
@@ -270,18 +238,18 @@ def main():
     args = parser.parse_args()
 
     if args.pipeline is not None:
-        run_pipeline(args.pipeline, stats=args.stats, cnn=args.cnn)
+        run_pipeline(args.pipeline, cnn=args.cnn)
     elif args.all:
-        for pid in range(11):
-            run_pipeline(pid, stats=args.stats, cnn=args.cnn)
+        for pid in range(10):
+            run_pipeline(pid, cnn=args.cnn)
     else:
         # Default: run common pipelines
         print("Running default pipelines for data-outside...")
-        run_pipeline(0, stats=args.stats, cnn=args.cnn)  # Baseline
-        run_pipeline(1, stats=args.stats, cnn=args.cnn)  # coords
-        run_pipeline(3, stats=args.stats, cnn=args.cnn)  # scaled
-        run_pipeline(5, stats=args.stats, cnn=args.cnn)  # scaled + depth
-        run_pipeline(8, stats=args.stats, cnn=args.cnn)  # per-fishtype scaled
+        run_pipeline(0, cnn=args.cnn)  # Baseline
+        run_pipeline(1, cnn=args.cnn)  # coords
+        run_pipeline(3, cnn=args.cnn)  # scaled
+        run_pipeline(5, cnn=args.cnn)  # scaled + depth
+        run_pipeline(8, cnn=args.cnn)  # per-fishtype scaled
 
 
 if __name__ == "__main__":
