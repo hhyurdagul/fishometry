@@ -1,42 +1,42 @@
 """
-Dataset Split Utility
+Dataset split utility.
 
-Splits raw.csv into train/val/test splits.
+This module enforces the dataset layout used by this project. Raw data must live
+under `data/<dataset_name>/raw.csv`, and split files are always written to
+`data/<dataset_name>/splits/`. If the dataset is not located in the `data`
+folder with those exact names and folders, this script will not work.
 
 Usage:
-    python -m src.create_data.split --input data/data-inside/raw.csv --output data/data-inside/splits
-    python -m src.create_data.split --input data/data-outside/raw.csv --output data/data-outside/splits
+    python -m src.create_data.split --dataset data-inside
+    python -m src.create_data.split --dataset data-outside
 """
 
-import os
-import argparse
+from pathlib import Path
+from typing import Annotated 
+
 import polars as pl
+import typer
+
+app = typer.Typer(add_completion=False, help="Split dataset into train/val/test.")
+
+DATA_DIR = Path("data")
+RAW_FILENAME = "raw.csv"
+SPLITS_DIRNAME = "splits"
+STRATIFY_DATASETS = {"data-outside"}
 
 
-def split_and_save(
+def save_splits(
     train_df: pl.DataFrame,
     val_df: pl.DataFrame,
     test_df: pl.DataFrame,
-    output_dir: str,
-):
-    """
-    Save train/val/test DataFrames to CSV files.
+    output_dir: Path,
+) -> None:
+    """Save train, validation, and test splits under the enforced output folder."""
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    Args:
-        train_df: Training DataFrame
-        val_df: Validation DataFrame
-        test_df: Test DataFrame
-        output_dir: Directory to save split CSVs
-    """
-    os.makedirs(output_dir, exist_ok=True)
-
-    train_path = os.path.join(output_dir, "train.csv")
-    val_path = os.path.join(output_dir, "val.csv")
-    test_path = os.path.join(output_dir, "test.csv")
-
-    train_df.write_csv(train_path)
-    val_df.write_csv(val_path)
-    test_df.write_csv(test_path)
+    train_df.write_csv(output_dir / "train.csv")
+    val_df.write_csv(output_dir / "val.csv")
+    test_df.write_csv(output_dir / "test.csv")
 
     print(f"Saved splits to {output_dir}")
     print(f"  Train: {len(train_df)}")
@@ -44,140 +44,118 @@ def split_and_save(
     print(f"  Test:  {len(test_df)}")
 
 
-def split_data_inside(
-    data_path: str,
-    output_dir: str,
+def compute_split_indices(
+    size: int,
+    train_ratio: float,
+    val_ratio: float,
+) -> tuple[int, int]:
+    """Compute split boundaries for train and validation sets."""
+    train_end = int(size * train_ratio)
+    val_end = int(size * (train_ratio + val_ratio))
+    return train_end, val_end
+
+
+def split_frame(
+    df: pl.DataFrame,
+    seed: int,
+    train_ratio: float,
+    val_ratio: float,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """Shuffle and split one dataframe into train, validation, and test frames."""
+    shuffled = df.sample(fraction=1.0, shuffle=True, seed=seed)
+    train_end, val_end = compute_split_indices(len(shuffled), train_ratio, val_ratio)
+
+    train_df = shuffled.slice(0, train_end)
+    val_df = shuffled.slice(train_end, val_end - train_end)
+    test_df = shuffled.slice(val_end, len(shuffled) - val_end)
+    return train_df, val_df, test_df
+
+
+def split_dataset(
+    dataset: str,
     seed: int = 42,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
-):
+) -> None:
     """
-    Split data-inside dataset into train/val/test splits using random sampling.
+    Split a dataset stored under the enforced project structure.
 
-    Args:
-        data_path: Path to input CSV file
-        output_dir: Directory to save split CSVs
-        seed: Random seed for reproducibility
-        train_ratio: Fraction for training set (default 0.7)
-        val_ratio: Fraction for validation set (default 0.15)
+    Raw data must exist at `data/<dataset>/raw.csv`. Output is always written to
+    `data/<dataset>/splits/`. Any dataset outside that structure is unsupported
+    and will fail.
     """
-    print(f"Processing split for {data_path} (data-inside)...")
-    try:
-        df = pl.read_csv(data_path)
-    except Exception as e:
-        print(f"Error reading {data_path}: {e}")
-        return
+    if not 0.0 < train_ratio < 1.0:
+        raise typer.BadParameter("train_ratio must be between 0 and 1.")
+    if not 0.0 <= val_ratio < 1.0:
+        raise typer.BadParameter("val_ratio must be between 0 and 1.")
+    if train_ratio + val_ratio >= 1.0:
+        raise typer.BadParameter("train_ratio + val_ratio must be less than 1.")
 
-    # Shuffle the dataset
-    df = df.sample(fraction=1.0, shuffle=True, seed=seed)
+    dataset_dir = DATA_DIR / dataset
+    raw_path = dataset_dir / RAW_FILENAME
+    output_dir = dataset_dir / SPLITS_DIRNAME
 
-    n = len(df)
-    train_end = int(n * train_ratio)
-    val_end = int(n * (train_ratio + val_ratio))
-
-    train_df = df.slice(0, train_end)
-    val_df = df.slice(train_end, val_end - train_end)
-    test_df = df.slice(val_end, n - val_end)
-
-    split_and_save(train_df, val_df, test_df, output_dir)
-
-
-def split_data_outside(
-    data_path: str,
-    output_dir: str,
-    seed: int = 42,
-    train_ratio: float = 0.7,
-    val_ratio: float = 0.15,
-):
-    """
-    Split data-outside dataset into train/val/test splits with stratification by fish_type.
-
-    Ensures each fish_type has the same ratio in train/val/test splits.
-
-    Args:
-        data_path: Path to input CSV file
-        output_dir: Directory to save split CSVs
-        seed: Random seed for reproducibility
-        train_ratio: Fraction for training set (default 0.7)
-        val_ratio: Fraction for validation set (default 0.15)
-    """
-    print(
-        f"Processing split for {data_path} (data-outside, stratified by fish_type)..."
-    )
-    try:
-        df = pl.read_csv(data_path)
-    except Exception as e:
-        print(f"Error reading {data_path}: {e}")
-        return
-
-    if "fish_type" not in df.columns:
-        print("Error: 'fish_type' column not found in dataset")
-        return
-
-    train_dfs = []
-    val_dfs = []
-    test_dfs = []
-
-    # Split each fish_type group separately to maintain ratios
-    for fish_type in df["fish_type"].unique().sort():
-        group_df = df.filter(pl.col("fish_type") == fish_type)
-        group_df = group_df.sample(fraction=1.0, shuffle=True, seed=seed)
-
-        n = len(group_df)
-        train_end = int(n * train_ratio)
-        val_end = int(n * (train_ratio + val_ratio))
-
-        train_dfs.append(group_df.slice(0, train_end))
-        val_dfs.append(group_df.slice(train_end, val_end - train_end))
-        test_dfs.append(group_df.slice(val_end, n - val_end))
-
-    # Concatenate all groups
-    train_df = pl.concat(train_dfs)
-    val_df = pl.concat(val_dfs)
-    test_df = pl.concat(test_dfs)
-
-    # Shuffle each split to mix fish types
-    train_df = train_df.sample(fraction=1.0, shuffle=True, seed=seed)
-    val_df = val_df.sample(fraction=1.0, shuffle=True, seed=seed)
-    test_df = test_df.sample(fraction=1.0, shuffle=True, seed=seed)
-
-    split_and_save(train_df, val_df, test_df, output_dir)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Split dataset into train/val/test")
-    parser.add_argument(
-        "--input", type=str, required=True, help="Path to input CSV (raw.csv)"
-    )
-    parser.add_argument(
-        "--output", type=str, required=True, help="Output directory for splits"
-    )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument(
-        "--train-ratio", type=float, default=0.7, help="Training set ratio"
-    )
-    parser.add_argument(
-        "--val-ratio", type=float, default=0.15, help="Validation set ratio"
-    )
-    args = parser.parse_args()
-
-    if "data-outside" in args.input:
-        split_data_outside(
-            args.input,
-            args.output,
-            seed=args.seed,
-            train_ratio=args.train_ratio,
-            val_ratio=args.val_ratio,
+    if not raw_path.exists():
+        raise typer.BadParameter(
+            f"Expected raw dataset at {raw_path}. "
+            "Raw data must be located under data/<dataset>/raw.csv."
         )
+
+    df = pl.read_csv(raw_path)
+
+    if dataset in STRATIFY_DATASETS:
+        if "fish_type" not in df.columns:
+            raise typer.BadParameter(
+                f"Dataset '{dataset}' requires a 'fish_type' column for stratified splitting."
+            )
+
+        train_parts = []
+        val_parts = []
+        test_parts = []
+
+        for fish_type in df["fish_type"].unique().sort():
+            group_df = df.filter(pl.col("fish_type") == fish_type)
+            train_df, val_df, test_df = split_frame(
+                group_df,
+                seed=seed,
+                train_ratio=train_ratio,
+                val_ratio=val_ratio,
+            )
+            train_parts.append(train_df)
+            val_parts.append(val_df)
+            test_parts.append(test_df)
+
+        train_df = pl.concat(train_parts).sample(fraction=1.0, shuffle=True, seed=seed)
+        val_df = pl.concat(val_parts).sample(fraction=1.0, shuffle=True, seed=seed)
+        test_df = pl.concat(test_parts).sample(fraction=1.0, shuffle=True, seed=seed)
+        print(f"Processing {dataset} with stratified splitting by fish_type...")
     else:
-        split_data_inside(
-            args.input,
-            args.output,
-            seed=args.seed,
-            train_ratio=args.train_ratio,
-            val_ratio=args.val_ratio,
+        train_df, val_df, test_df = split_frame(
+            df,
+            seed=seed,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
         )
+        print(f"Processing {dataset} with random splitting...")
+
+    save_splits(train_df, val_df, test_df, output_dir)
+
+
+@app.command()
+def main(
+    dataset: Annotated[str, typer.Option(help="Dataset name under the data folder")] = "data-inside",
+    seed: int = typer.Option(42, help="Random seed"),
+    train_ratio: float = typer.Option(0.7, help="Training set ratio"),
+    val_ratio: float = typer.Option(0.15, help="Validation set ratio"),
+) -> None:
+    """Split one dataset using the enforced `data/<dataset>/raw.csv` structure."""
+    split_dataset(
+        dataset=dataset,
+        seed=seed,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+    )
 
 
 if __name__ == "__main__":
-    main()
+    app()

@@ -3,16 +3,22 @@ Data Augmentation Utilities
 
 Provides zoom augmentation and dataset creation with zoomed images.
 
+Provided source and destination assumed to be in the root data directory.
+
 Usage:
     python -m src.create_data.augment --source data-inside --dest data-inside-zoom
 """
 
+from typing import Annotated
+
 import os
 import random
-import argparse
 
 import cv2
 import polars as pl
+import typer
+
+app = typer.Typer(add_completion=False, help="Create a zoom-augmented dataset.")
 
 
 def augment_zoom(image, zoom_type: str = "in", magnitude: float = 0.1):
@@ -56,8 +62,11 @@ def augment_zoom(image, zoom_type: str = "in", magnitude: float = 0.1):
     return image
 
 
+
+
 def process_zoom_dataset(
-    source_name: str = "data-inside", dest_name: str = "data-inside-zoom"
+    source: str = "data-inside",
+    dest: str = "data-inside-zoom",
 ):
     """
     Create a zoomed dataset from an existing dataset.
@@ -71,11 +80,11 @@ def process_zoom_dataset(
         source_name: Source dataset name (e.g., "data-inside")
         dest_name: Destination dataset name (e.g., "data-inside-zoom")
     """
-    print(f"Augmenting {source_name} -> {dest_name}")
+    print(f"Augmenting {source} -> {dest}")
 
     splits = ["train", "val", "test"]
-    base_dir = f"data/{source_name}"
-    dest_dir = f"data/{dest_name}"
+    base_dir = f"data/{source}"
+    dest_dir = f"data/{dest}"
 
     os.makedirs(os.path.join(dest_dir, "raw"), exist_ok=True)
     os.makedirs(os.path.join(dest_dir, "splits"), exist_ok=True)
@@ -148,21 +157,18 @@ def process_zoom_dataset(
 
     # Save global raw.csv
     pl.DataFrame(all_rows).write_csv(os.path.join(dest_dir, "raw.csv"))
-    print(f"Finished creating {dest_name}")
+    print(f"Finished creating {dest}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Create zoom-augmented dataset")
-    parser.add_argument(
-        "--source", type=str, default="data-inside", help="Source dataset name"
-    )
-    parser.add_argument(
-        "--dest", type=str, default="data-inside-zoom", help="Destination dataset name"
-    )
-    args = parser.parse_args()
 
-    process_zoom_dataset(args.source, args.dest)
+@app.command()
+def main(
+    source: Annotated[str, typer.Option(help="Source dataset name")] = "data-inside",
+    dest: Annotated[str, typer.Option(help="Destination dataset name")] = "data-inside-zoom",
+):
+    """Create a zoom-augmented dataset."""
+    process_zoom_dataset(source, dest)
 
 
 if __name__ == "__main__":
-    main()
+    app()
