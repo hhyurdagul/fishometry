@@ -17,18 +17,6 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
     """Run a specific pipeline configuration."""
     print(f"\n>>> Running Pipeline {pipeline_id} for {dataset_name} <<<")
 
-    # Mapping config names
-    if dataset_name == "data-inside":
-        config_path = "configs/config_inside.yaml"
-    elif dataset_name == "data-inside-zoom":
-        config_path = "configs/config_inside_zoom.yaml"
-    elif dataset_name == "data-outside":
-        config_path = "configs/config_outside.yaml"
-    else:
-        config_path = (
-            f"configs/config_{dataset_name.replace('data-', '').replace('-', '_')}.yaml"
-        )
-
     splits = ["train", "val", "test"] if all_splits else ["train"]
 
     # Run Baseline
@@ -42,7 +30,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         cmd = [
             sys.executable,
             "-m",
-            "src.training.regression",
+            "src.training.linear",
             "--dataset",
             dataset_name,
             "--feature-set",
@@ -79,7 +67,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         cmd = [
             sys.executable,
             "-m",
-            "src.training.regression",
+            "src.training.linear",
             "--dataset",
             dataset_name,
             "--feature-set",
@@ -116,7 +104,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         cmd = [
             sys.executable,
             "-m",
-            "src.training.regression",
+            "src.training.linear",
             "--dataset",
             dataset_name,
             "--feature-set",
@@ -153,7 +141,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         cmd = [
             sys.executable,
             "-m",
-            "src.training.regression",
+            "src.training.linear",
             "--dataset",
             dataset_name,
             "--feature-set",
@@ -193,7 +181,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         cmd = [
             sys.executable,
             "-m",
-            "src.training.regression",
+            "src.training.linear",
             "--dataset",
             dataset_name,
             "--feature-set",
@@ -250,7 +238,7 @@ def main():
     parser.add_argument(
         "--pipeline",
         type=int,
-        choices=[1, 2, 3, 4, 5, 6],
+        choices=[0, 1, 2, 3, 4, 5, 6],
         help="Specific pipeline to run",
     )
     parser.add_argument("--dataset", type=str, help="Specific dataset")

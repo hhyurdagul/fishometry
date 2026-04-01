@@ -5,8 +5,8 @@ import streamlit as st
 import polars as pl
 import numpy as np
 
-from data_loading import load_predictions_list, load_prediction_df
-from image_processing import process_images
+from src.visualization.data_loading import load_prediction_df, load_predictions_list
+from src.visualization.image_processing import process_images
 
 
 def render_analysis(dataset, df_meta, all_image_names, depth_model):

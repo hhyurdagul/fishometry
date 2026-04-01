@@ -2,8 +2,12 @@
 
 import streamlit as st
 
-from data_loading import get_datasets, load_dataset_metadata, get_depth_models
-from views import (
+from src.visualization.data_loading import (
+    get_datasets,
+    get_depth_models,
+    load_dataset_metadata,
+)
+from src.visualization.views import (
     render_explorer,
     render_analysis,
     render_comparison,

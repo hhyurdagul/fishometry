@@ -3,8 +3,8 @@
 import streamlit as st
 import polars as pl
 
-from data_loading import load_all_predictions_for_image
-from image_processing import process_images
+from src.visualization.data_loading import load_all_predictions_for_image
+from src.visualization.image_processing import process_images
 
 
 def render_explorer(dataset, df_meta, all_image_names, depth_model):

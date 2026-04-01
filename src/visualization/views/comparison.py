@@ -5,7 +5,7 @@ import streamlit as st
 import polars as pl
 import numpy as np
 
-from data_loading import load_predictions_list, load_prediction_df
+from src.visualization.data_loading import load_prediction_df, load_predictions_list
 
 
 def render_comparison(dataset):

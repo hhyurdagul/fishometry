@@ -5,8 +5,9 @@ import streamlit as st
 import polars as pl
 import altair as alt
 import numpy as np
+import pandas as pd
 
-from data_loading import load_predictions_list, load_prediction_df
+from src.visualization.data_loading import load_prediction_df, load_predictions_list
 
 
 def render_prediction_viz(dataset):
@@ -250,7 +251,3 @@ def render_prediction_viz(dataset):
         hide_index=True,
         width="stretch",
     )
-
-
-# Need pandas for pd.cut
-import pandas as pd
