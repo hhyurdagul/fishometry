@@ -7,11 +7,13 @@ Usage:
     python -m src.training.baseline --dataset data-inside
 """
 
-import argparse
 import polars as pl
 import numpy as np
 import os
 from sklearn.metrics import mean_absolute_percentage_error
+import typer
+
+app = typer.Typer(add_completion=False, help="Train baseline model.")
 
 
 def train_baseline(train_path, val_path, test_path, dataset_name):
@@ -102,18 +104,15 @@ def train_baseline(train_path, val_path, test_path, dataset_name):
         res_df.write_csv(os.path.join(pred_dir, f"baseline_{split_name}.csv"))
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train baseline model")
-    parser.add_argument("--dataset", type=str, required=True)
-    args = parser.parse_args()
-
-    base_dir = f"data/{args.dataset}/processed"
+@app.command()
+def main(dataset: str = typer.Option(..., help="Dataset name")):
+    base_dir = f"data/{dataset}/processed"
     train_path = f"{base_dir}/processed_train.csv"
     val_path = f"{base_dir}/processed_val.csv"
     test_path = f"{base_dir}/processed_test.csv"
 
-    train_baseline(train_path, val_path, test_path, args.dataset)
+    train_baseline(train_path, val_path, test_path, dataset)
 
 
 if __name__ == "__main__":
-    main()
+    app()

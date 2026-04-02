@@ -14,9 +14,9 @@ Usage:
     python -m src.preprocessing.run --config configs/config_inside.yaml --all-splits
 """
 
-import argparse
 import os
 import polars as pl
+import typer
 from src.utils.io import load_config, load_csv, save_csv
 from src.preprocessing.steps.yolo import YoloStep
 from src.preprocessing.steps.rotate import RotateStep
@@ -24,6 +24,8 @@ from src.preprocessing.steps.depth import DepthStep
 from src.preprocessing.steps.segment import SegmentStep
 from src.preprocessing.steps.blackout import BlackoutStep
 from src.preprocessing.steps.feature import FeatureStep
+
+app = typer.Typer(add_completion=False, help="Run the preprocessing pipeline.")
 
 
 def run_pipeline(config, in_data_path=None, out_data_path=None, steps=None):
@@ -68,26 +70,21 @@ def run_pipeline(config, in_data_path=None, out_data_path=None, steps=None):
     print(f"Saved results to {out_data_path}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Fishometry Preprocessing Pipeline")
-    parser.add_argument("--config", type=str, required=True, help="Path to config file")
-    parser.add_argument(
-        "--limit", type=int, default=None, help="Limit number of images to process"
-    )
-    parser.add_argument(
-        "--all-splits",
-        action="store_true",
-        help="Process all splits (train, val, test)",
-    )
-    args = parser.parse_args()
-
-    config = load_config(args.config)
+@app.command()
+def main(
+    config: str = typer.Option(..., help="Path to config file"),
+    limit: int | None = typer.Option(None, help="Limit number of images to process"),
+    all_splits: bool = typer.Option(
+        False, "--all-splits", help="Process all splits (train, val, test)"
+    ),
+):
+    config = load_config(config)
 
     # Apply limit if specified
-    if args.limit:
-        config["params"]["limit"] = args.limit
+    if limit:
+        config["params"]["limit"] = limit
 
-    if args.all_splits:
+    if all_splits:
         dataset_name = config.get("dataset_name", "data-inside")
         # Ensure output directory exists
         base_out_dir = config["paths"]["output"]
@@ -120,4 +117,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    app()

@@ -7,7 +7,6 @@ Usage:
     python -m src.training.cnn --dataset data-inside --feature-set coords --epochs 100
 """
 
-import argparse
 import os
 import torch
 import torch.nn as nn
@@ -18,8 +17,12 @@ import polars as pl
 from PIL import Image
 from sklearn.metrics import mean_absolute_percentage_error
 import numpy as np
+import typer
 
 from src.training.data_loader import load_data, get_feature_description
+
+app = typer.Typer(add_completion=False, help="Train CNN model.")
+VALID_FEATURE_SETS = {"coords", "scaled", "eye"}
 
 
 class FishModel(nn.Module):
@@ -254,31 +257,29 @@ def train_cnn(
         df.write_csv(os.path.join(pred_dir, f"cnn_{feature_desc}_{split_name}.csv"))
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train CNN model")
-    parser.add_argument("--dataset", type=str, required=True, help="dataset name")
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument(
-        "--feature-set",
-        type=str,
-        nargs="+",
-        choices=["coords", "scaled", "eye"],
-        default=["coords"],
-    )
-    parser.add_argument("--depth", action="store_true", help="Use depth v2 features")
-    parser.add_argument(
-        "--stats", action="store_true", help="Include species stats features"
-    )
-    args = parser.parse_args()
+@app.command()
+def main(
+    dataset: str = typer.Option(..., help="Dataset name"),
+    epochs: int = typer.Option(10, help="Number of epochs"),
+    feature_set: list[str] = typer.Option(["coords"], "--feature-set", help="Feature set"),
+    depth: bool = typer.Option(False, help="Use depth v2 features"),
+    stats: bool = typer.Option(False, help="Include species stats features"),
+):
+    invalid = sorted(set(feature_set) - VALID_FEATURE_SETS)
+    if invalid:
+        raise typer.BadParameter(
+            f"Unsupported feature set(s): {', '.join(invalid)}. "
+            f"Expected one of: {', '.join(sorted(VALID_FEATURE_SETS))}."
+        )
 
     train_cnn(
-        args.dataset,
-        epochs=args.epochs,
-        feature_sets=args.feature_set,
-        depth_model="depth" if args.depth else None,
-        include_stats=args.stats,
+        dataset,
+        epochs=epochs,
+        feature_sets=feature_set,
+        depth_model="depth" if depth else None,
+        include_stats=stats,
     )
 
 
 if __name__ == "__main__":
-    main()
+    app()

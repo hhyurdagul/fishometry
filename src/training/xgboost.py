@@ -8,7 +8,6 @@ Usage:
     python -m src.training.xgboost --dataset data-outside --feature-set scaled --depth
 """
 
-import argparse
 import os
 import numpy as np
 import polars as pl
@@ -16,8 +15,12 @@ from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_absolute_percentage_error
 import joblib
+import typer
 
 from src.training.data_loader import load_data, get_feature_description
+
+app = typer.Typer(add_completion=False, help="Train XGBoost model.")
+VALID_FEATURE_SETS = {"coords", "scaled", "eye"}
 
 
 def train_xgboost(
@@ -122,47 +125,33 @@ def train_xgboost(
         df.write_csv(os.path.join(pred_dir, f"xgboost_{feature_desc}_{split_name}.csv"))
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train XGBoost model")
-    parser.add_argument(
-        "--dataset", type=str, required=True, help="Dataset name e.g. data-outside"
-    )
-    parser.add_argument(
-        "--feature-set",
-        type=str,
-        nargs="+",
-        choices=["coords", "scaled", "eye"],
-        required=True,
-    )
-    parser.add_argument(
-        "--depth",
-        action="store_true",
-        help="Use depth v2 features",
-    )
-    parser.add_argument(
-        "--stats",
-        action="store_true",
-        help="Include species stats features",
-    )
-    parser.add_argument(
-        "--n-estimators", type=int, default=100, help="Number of boosting rounds"
-    )
-    parser.add_argument("--max-depth", type=int, default=6, help="Maximum tree depth")
-    parser.add_argument(
-        "--learning-rate", type=float, default=0.1, help="Learning rate"
-    )
-    args = parser.parse_args()
+@app.command()
+def main(
+    dataset: str = typer.Option(..., help="Dataset name e.g. data-outside"),
+    feature_set: list[str] = typer.Option(..., "--feature-set", help="Feature set"),
+    depth: bool = typer.Option(False, help="Use depth v2 features"),
+    stats: bool = typer.Option(False, help="Include species stats features"),
+    n_estimators: int = typer.Option(100, "--n-estimators", help="Number of boosting rounds"),
+    max_depth: int = typer.Option(6, help="Maximum tree depth"),
+    learning_rate: float = typer.Option(0.1, help="Learning rate"),
+):
+    invalid = sorted(set(feature_set) - VALID_FEATURE_SETS)
+    if invalid:
+        raise typer.BadParameter(
+            f"Unsupported feature set(s): {', '.join(invalid)}. "
+            f"Expected one of: {', '.join(sorted(VALID_FEATURE_SETS))}."
+        )
 
     train_xgboost(
-        args.dataset,
-        feature_sets=args.feature_set,
-        depth_model="depth" if args.depth else None,
-        include_stats=args.stats,
-        n_estimators=args.n_estimators,
-        max_depth=args.max_depth,
-        learning_rate=args.learning_rate,
+        dataset,
+        feature_sets=feature_set,
+        depth_model="depth" if depth else None,
+        include_stats=stats,
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
     )
 
 
 if __name__ == "__main__":
-    main()
+    app()

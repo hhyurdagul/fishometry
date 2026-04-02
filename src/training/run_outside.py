@@ -8,11 +8,12 @@ Usage:
     python -m src.training.run_outside --pipeline 1  # Run specific pipeline
 """
 
-import argparse
 import sys
 import subprocess
+import typer
 
 DATASET = "data-outside"
+app = typer.Typer(add_completion=False, help="Training orchestrator for outside data.")
 
 
 def run_pipeline(pipeline_id, cnn=False):
@@ -215,42 +216,30 @@ def run_pipeline(pipeline_id, cnn=False):
         print(f"Unknown pipeline: {pipeline_id}")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Training orchestrator for outside data"
-    )
-    parser.add_argument(
-        "--pipeline",
-        type=int,
-        choices=list(range(10)),
-        help="Specific pipeline to run (0-9)",
-    )
-    parser.add_argument(
-        "--cnn",
-        action="store_true",
-        help="Include CNN training for per-fishtype pipelines (6-9)",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Run all pipelines",
-    )
-    args = parser.parse_args()
-
-    if args.pipeline is not None:
-        run_pipeline(args.pipeline, cnn=args.cnn)
-    elif args.all:
+@app.command()
+def main(
+    pipeline: int | None = typer.Option(
+        None, min=0, max=9, help="Specific pipeline to run (0-9)"
+    ),
+    cnn: bool = typer.Option(
+        False, help="Include CNN training for per-fishtype pipelines (6-9)"
+    ),
+    all: bool = typer.Option(False, "--all", help="Run all pipelines"),
+):
+    if pipeline is not None:
+        run_pipeline(pipeline, cnn=cnn)
+    elif all:
         for pid in range(10):
-            run_pipeline(pid, cnn=args.cnn)
+            run_pipeline(pid, cnn=cnn)
     else:
         # Default: run common pipelines
         print("Running default pipelines for data-outside...")
-        run_pipeline(0, cnn=args.cnn)  # Baseline
-        run_pipeline(1, cnn=args.cnn)  # coords
-        run_pipeline(3, cnn=args.cnn)  # scaled
-        run_pipeline(5, cnn=args.cnn)  # scaled + depth
-        run_pipeline(8, cnn=args.cnn)  # per-fishtype scaled
+        run_pipeline(0, cnn=cnn)  # Baseline
+        run_pipeline(1, cnn=cnn)  # coords
+        run_pipeline(3, cnn=cnn)  # scaled
+        run_pipeline(5, cnn=cnn)  # scaled + depth
+        run_pipeline(8, cnn=cnn)  # per-fishtype scaled
 
 
 if __name__ == "__main__":
-    main()
+    app()

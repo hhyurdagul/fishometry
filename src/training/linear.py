@@ -8,7 +8,6 @@ Usage:
     python -m src.training.linear --dataset data-outside --feature-set scaled --depth
 """
 
-import argparse
 import polars as pl
 import numpy as np
 from sklearn.linear_model import LinearRegression
@@ -17,8 +16,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import joblib
 import os
+import typer
 
 from src.training.data_loader import load_data, get_feature_description
+
+app = typer.Typer(add_completion=False, help="Train linear regression model.")
+VALID_FEATURE_SETS = {"coords", "scaled", "eye"}
 
 
 def train_and_eval(
@@ -92,31 +95,21 @@ def train_and_eval(
     print(f"Model saved to {os.path.join(model_dir, save_name)}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train linear regression model")
-    parser.add_argument(
-        "--dataset", type=str, required=True, help="dataset name e.g. data-inside"
-    )
-    parser.add_argument(
-        "--feature-set",
-        type=str,
-        nargs="+",
-        choices=["coords", "scaled", "eye"],
-        required=True,
-    )
-    parser.add_argument(
-        "--depth",
-        action="store_true",
-        help="Use depth v2 features",
-    )
-    parser.add_argument(
-        "--stats",
-        action="store_true",
-        help="Include species stats features",
-    )
-    args = parser.parse_args()
+@app.command()
+def main(
+    dataset: str = typer.Option(..., help="Dataset name e.g. data-inside"),
+    feature_set: list[str] = typer.Option(..., "--feature-set", help="Feature set"),
+    depth: bool = typer.Option(False, help="Use depth v2 features"),
+    stats: bool = typer.Option(False, help="Include species stats features"),
+):
+    invalid = sorted(set(feature_set) - VALID_FEATURE_SETS)
+    if invalid:
+        raise typer.BadParameter(
+            f"Unsupported feature set(s): {', '.join(invalid)}. "
+            f"Expected one of: {', '.join(sorted(VALID_FEATURE_SETS))}."
+        )
 
-    base_dir = f"data/{args.dataset}/processed"
+    base_dir = f"data/{dataset}/processed"
     train_path = f"{base_dir}/processed_train.csv"
     val_path = f"{base_dir}/processed_val.csv"
     test_path = f"{base_dir}/processed_test.csv"
@@ -125,12 +118,12 @@ def main():
         train_path,
         val_path,
         test_path,
-        args.feature_set,
-        args.dataset,
-        depth_model="depth" if args.depth else None,
-        include_stats=args.stats,
+        feature_set,
+        dataset,
+        depth_model="depth" if depth else None,
+        include_stats=stats,
     )
 
 
 if __name__ == "__main__":
-    main()
+    app()

@@ -8,9 +8,11 @@ Usage:
     python -m src.training.run  # Runs default tasks
 """
 
-import argparse
 import sys
 import subprocess
+import typer
+
+app = typer.Typer(add_completion=False, help="Training orchestrator.")
 
 
 def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
@@ -233,17 +235,13 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
         subprocess.run(cmd, check=True)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Training orchestrator")
-    parser.add_argument(
-        "--pipeline",
-        type=int,
-        choices=[0, 1, 2, 3, 4, 5, 6],
-        help="Specific pipeline to run",
-    )
-    parser.add_argument("--dataset", type=str, help="Specific dataset")
-    args = parser.parse_args()
-
+@app.command()
+def main(
+    pipeline: int | None = typer.Option(
+        None, min=0, max=6, help="Specific pipeline to run"
+    ),
+    dataset: str | None = typer.Option(None, help="Specific dataset"),
+):
     tasks = []
 
     # 0: Baseline
@@ -253,8 +251,8 @@ def main():
     # 4: Regression with depth+coord features
     # 5: Regression with depth+scaled features
     # 6: CNN with depth+scaled features and blackout images
-    if args.dataset and args.pipeline:
-        tasks.append((args.dataset, args.pipeline))
+    if dataset and pipeline is not None:
+        tasks.append((dataset, pipeline))
     else:
         tasks.append(("data-inside", 0))
         tasks.append(("data-inside", 1))
@@ -272,4 +270,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    app()

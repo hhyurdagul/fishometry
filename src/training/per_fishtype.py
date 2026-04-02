@@ -9,7 +9,6 @@ Usage:
     python -m src.training.per_fishtype --dataset data-outside --feature-set scaled --depth --epochs 200 --cnn --cnn-epochs 100
 """
 
-import argparse
 import os
 import numpy as np
 import polars as pl
@@ -25,11 +24,14 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_absolute_percentage_error
 from xgboost import XGBRegressor
 import joblib
+import typer
 
 from src.training.data_loader import load_data, get_feature_description
 from src.training.mlp import FishMLP, TabularDataset
 from src.training.cnn import FishModel
 
+app = typer.Typer(add_completion=False, help="Train models per fish type.")
+VALID_FEATURE_SETS = {"coords", "scaled", "eye"}
 
 MIN_SAMPLES_WARNING = 30
 
@@ -780,41 +782,33 @@ def train_per_fishtype(
     print(f"{'=' * 60}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train models per fish type")
-    parser.add_argument(
-        "--dataset", type=str, required=True, help="Dataset name e.g. data-outside"
-    )
-    parser.add_argument(
-        "--feature-set",
-        type=str,
-        nargs="+",
-        choices=["coords", "scaled", "eye"],
-        required=True,
-    )
-    parser.add_argument("--depth", action="store_true", help="Use depth v2 features")
-    parser.add_argument(
-        "--stats", action="store_true", help="Include species stats features"
-    )
-    parser.add_argument("--cnn", action="store_true", help="Include CNN model training")
-    parser.add_argument(
-        "--epochs", type=int, default=200, help="Number of epochs for MLP"
-    )
-    parser.add_argument(
-        "--cnn-epochs", type=int, default=100, help="Number of epochs for CNN"
-    )
-    args = parser.parse_args()
+@app.command()
+def main(
+    dataset: str = typer.Option(..., help="Dataset name e.g. data-outside"),
+    feature_set: list[str] = typer.Option(..., "--feature-set", help="Feature set"),
+    depth: bool = typer.Option(False, help="Use depth v2 features"),
+    stats: bool = typer.Option(False, help="Include species stats features"),
+    cnn: bool = typer.Option(False, help="Include CNN model training"),
+    epochs: int = typer.Option(200, help="Number of epochs for MLP"),
+    cnn_epochs: int = typer.Option(100, "--cnn-epochs", help="Number of epochs for CNN"),
+):
+    invalid = sorted(set(feature_set) - VALID_FEATURE_SETS)
+    if invalid:
+        raise typer.BadParameter(
+            f"Unsupported feature set(s): {', '.join(invalid)}. "
+            f"Expected one of: {', '.join(sorted(VALID_FEATURE_SETS))}."
+        )
 
     train_per_fishtype(
-        args.dataset,
-        feature_sets=args.feature_set,
-        depth_model="depth" if args.depth else None,
-        include_stats=args.stats,
-        epochs=args.epochs,
-        cnn_epochs=args.cnn_epochs,
-        include_cnn=args.cnn,
+        dataset,
+        feature_sets=feature_set,
+        depth_model="depth" if depth else None,
+        include_stats=stats,
+        epochs=epochs,
+        cnn_epochs=cnn_epochs,
+        include_cnn=cnn,
     )
 
 
 if __name__ == "__main__":
-    main()
+    app()
