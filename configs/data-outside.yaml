@@ -1,0 +1,7 @@
+name: "data-outside"
+models:
+  yolo: "checkpoints/yolov11m-all_fish_model.pt"
+  sam: "checkpoints/sam.pth"
+  depth: "checkpoints/depth_anything_v2_vitl.pth"
+params:
+  yolo_conf: 0.8

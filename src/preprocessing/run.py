@@ -72,13 +72,13 @@ def run_pipeline(config, in_data_path=None, out_data_path=None, steps=None):
 
 @app.command()
 def main(
-    config: str = typer.Option(..., help="Path to config file"),
+    config_path: str = typer.Option(..., help="Path to config file"),
     limit: int | None = typer.Option(None, help="Limit number of images to process"),
     all_splits: bool = typer.Option(
         False, "--all-splits", help="Process all splits (train, val, test)"
     ),
 ):
-    config = load_config(config)
+    config = load_config(config_path)
 
     # Apply limit if specified
     if limit:
