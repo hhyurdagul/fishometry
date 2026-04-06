@@ -53,6 +53,11 @@ class Config(BaseModel):
 
     @computed_field
     @property
+    def split_csv_path(self) -> Path:
+        return DATA_ROOT / self.name / "split.csv"
+
+    @computed_field
+    @property
     def output_csv_path(self) -> Path:
         return DATA_ROOT / self.name / "processed.csv"
 

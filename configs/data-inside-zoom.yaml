@@ -1,10 +1,11 @@
-name: "data-inside-zoom"
-rotate: true
+fish_type_available: false
 models:
-  yolo: "checkpoints/yolo11m-inside_fish_model.pt"
-  sam: "checkpoints/sam.pth"
-  depth: "checkpoints/depth_anything_v2_vitl.pth"
+  depth: checkpoints/depth_anything_v2_vitl.pth
+  sam: checkpoints/sam.pth
+  yolo: checkpoints/yolo11m-inside_fish_model.pt
+name: data-inside-zoom
 params:
+  test_ratio: 0.15
   train_ratio: 0.7
   val_ratio: 0.15
-  test_ratio: 0.15
+rotate: true

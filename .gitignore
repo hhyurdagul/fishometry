@@ -13,3 +13,4 @@ wheels/
 data/
 checkpoints/
 third_party/
+tmp/
