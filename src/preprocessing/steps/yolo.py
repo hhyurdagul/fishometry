@@ -6,18 +6,19 @@ from tqdm import tqdm
 from ultralytics import YOLO
 from .base import PipelineStep
 from src.utils.io import load_image, get_raw_name
+from src.config import Config
 
 
 class YoloStep(PipelineStep):
-    def __init__(self, config, stage="initial"):
+    def __init__(self, config: Config, rotated: bool=False):
         super().__init__(config)
-        self.stage = stage
-        self.model_path = config["models"]["yolo"]
-        self.conf = config["params"]["yolo_conf"]
+        self.rotated = rotated
+        self.model_path = config.models.yolo
+        self.conf = config.params.yolo_conf
         self.input_dir = (
-            config["paths"]["raw"]
-            if stage == "initial"
-            else config["paths"]["output"] + "/rotated"
+            config.input_dir
+            if not rotated
+            else config.output_dir / "rotated"
         )
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -25,16 +26,14 @@ class YoloStep(PipelineStep):
 
         coord_data = []
         names = df["name"].to_list()
-        if "limit" in self.config["params"] and self.config["params"]["limit"]:
-            names = names[: self.config["params"]["limit"]]
 
         # Prepare cache dir
         cache_dir = os.path.join(
-            self.config["paths"]["output"], "cache", f"yolo_{self.stage}"
+            self.config.output_dir, "cache", f"yolo_{'rotated' if self.rotated else 'initial'}"
         )
         os.makedirs(cache_dir, exist_ok=True)
 
-        for name in tqdm(names, desc=f"YOLO {self.stage}"):
+        for name in tqdm(names, desc=f"YOLO {'rotated' if self.rotated else 'initial'}"):
             image_path = os.path.join(self.input_dir, name)
             if not os.path.exists(image_path):
                 continue
@@ -66,7 +65,7 @@ class YoloStep(PipelineStep):
                 coord_data.append({"name": name, **prediction})
 
         if not coord_data:
-            print(f"Warning: No VALID detections found in YoloStep {self.stage}.")
+            print(f"Warning: No VALID detections found in YoloStep {'rotated' if self.rotated else 'initial'}.")
             # If we return df as is, subsequent steps might fail if they expect coords.
             # But better than crashing here.
             # Ideally filter df to empty? Or just return.

@@ -8,8 +8,9 @@ Provided source and destination assumed to be in the root data directory.
 Usage:
     python -m src.create_data.augment --source data-inside --dest data-inside-zoom
 """
+from config import get_valid_configs
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import os
 import random
@@ -160,13 +161,14 @@ def process_zoom_dataset(
     print(f"Finished creating {dest}")
 
 
-
 @app.command()
 def main(
     source: Annotated[str, typer.Option(help="Source dataset name")] = "data-inside",
     dest: Annotated[str, typer.Option(help="Destination dataset name")] = "data-inside-zoom",
 ):
     """Create a zoom-augmented dataset."""
+    if source not in get_valid_configs():
+        raise ValueError(f"Source dataset `{source}` does not exist")
     process_zoom_dataset(source, dest)
 
 

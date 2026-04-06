@@ -10,6 +10,7 @@ Usage:
     python -m src.create_data.split --dataset data-inside
     python -m src.create_data.split --dataset data-outside
 """
+from src.config import get_valid_configs
 
 from pathlib import Path
 from typing import Annotated 
@@ -149,6 +150,8 @@ def main(
     val_ratio: float = typer.Option(0.15, help="Validation set ratio"),
 ) -> None:
     """Split one dataset using the enforced `data/<dataset>/raw.csv` structure."""
+    if dataset not in get_valid_configs():
+        raise ValueError(f"Dataset `{dataset}` does not exist")
     split_dataset(
         dataset=dataset,
         seed=seed,

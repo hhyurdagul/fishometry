@@ -3,6 +3,7 @@ from pydantic import (
     BaseModel,
     computed_field,
     model_validator,
+    field_validator
 )
 
 import yaml
@@ -18,36 +19,60 @@ class ModelConfig(BaseModel):
 
 
 class ParamConfig(BaseModel):
-    yolo_conf: float
+    train_ratio: float = 0.7
+    val_ratio: float = 0.15
+    test_ratio: float = 0.15
+
+    @field_validator("train_ratio", "val_ratio", "test_ratio")
+    @classmethod
+    def check_range(cls, v):
+        if not 0.0 < v < 1.0:
+            raise ValueError(f"Value must be between 0.0 and 1.0")
+        return v
+
+    @model_validator(mode="after")
+    def validate(self):
+        if self.train_ratio + self.val_ratio + self.test_ratio > 1.0:
+            raise ValueError("Train, val, and test ratios must sum to less than 1.0")
+        return self
+
+
 
 
 class Config(BaseModel):
     name: str
+    rotate: bool = True
+    fish_type_available: bool = False
     models: ModelConfig
     params: ParamConfig
 
     @computed_field
     @property
-    def raw_csv_path(self) -> Path:
+    def input_csv_path(self) -> Path:
         return DATA_ROOT / self.name / "raw.csv"
 
     @computed_field
     @property
-    def raw_dir(self) -> Path:
+    def output_csv_path(self) -> Path:
+        return DATA_ROOT / self.name / "processed.csv"
+
+    @computed_field
+    @property
+    def input_dir(self) -> Path:
         return DATA_ROOT / self.name / "raw"
 
     @computed_field
     @property
-    def processed_dir(self) -> Path:
+    def output_dir(self) -> Path:
         return DATA_ROOT / self.name / "processed"
 
     @model_validator(mode="after")
     def validate(self):
         if not (DATA_ROOT / self.name).exists():
             raise ValueError(f"Dataset `{self.name}` does not exist")
-        if not self.raw_dir.exists():
+        if not self.input_dir.exists():
             raise ValueError(f"Directory `raw` does not exist")
-        if not self.raw_csv_path.exists():
+        if not self.input_csv_path.exists():
             raise ValueError(f"File `raw.csv` does not exist")
         return self
 
@@ -65,8 +90,13 @@ def get_valid_configs() -> list[str]:
 
     return sorted(configs)
 
+def get_config(config_name: str) -> Config:
+    config_path = (CONFIG_ROOT / config_name).with_suffix(".yaml")
+    if not config_path.exists():
+        raise ValueError(f"Config `{config_name}` does not exist")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return Config(**yaml.safe_load(f))
 
 if __name__ == "__main__":
     print(get_valid_configs())
 
-# print(load_config("data-inside"))

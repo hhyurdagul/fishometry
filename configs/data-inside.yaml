@@ -1,4 +1,5 @@
 name: "data-inside"
+rotate: true
 models:
   yolo: "checkpoints/yolo11m-inside_fish_model.pt"
   sam: "checkpoints/sam.pth"

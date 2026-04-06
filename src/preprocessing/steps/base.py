@@ -1,10 +1,11 @@
+from src.config import Config
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 import polars as pl
 
 
 class PipelineStep(ABC):
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Config):
         self.config = config
 
     @abstractmethod

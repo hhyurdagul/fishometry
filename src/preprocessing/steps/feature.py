@@ -1,3 +1,4 @@
+from src.config import Config
 import polars as pl
 import numpy as np
 import os
@@ -6,7 +7,7 @@ from .base import PipelineStep
 
 
 class FeatureStep(PipelineStep):
-    def __init__(self, config):
+    def __init__(self, config: Config):
         super().__init__(config)
         self.train_path = config["paths"].get("train_split")
         self.stats = None
@@ -42,40 +43,10 @@ class FeatureStep(PipelineStep):
 
         # 1. Fish Stats
         if "fish_type" in df_train.columns:
-            # Group by fish_type
-            stats_df = df_train.group_by("fish_type").agg(
-                [
-                    pl.col("length").mean().alias("mean_length"),
-                    pl.col("length").median().alias("median_length"),
-                    pl.col("length").min().alias("min_length"),
-                    pl.col("length").max().alias("max_length"),
-                    pl.col("length").std().alias("std_length"),
-                ]
-            )
-            self.stats = {
-                row["fish_type"]: {
-                    "mean": row["mean_length"],
-                    "median": row["median_length"],
-                    "min": row["min_length"],
-                    "max": row["max_length"],
-                    "std": row["std_length"],
-                }
-                for row in stats_df.to_dicts()
-            }
             self.fish_types = sorted(
-                list(self.stats.keys())
-            )  # For deterministic one-hot encoding
+                list(set(df_train["fish_type"].to_list()))
+            )
         else:
-            # Global stats
-            self.stats = {
-                "global": {
-                    "mean": df_train["length"].mean(),
-                    "median": df_train["length"].median(),
-                    "min": df_train["length"].min(),
-                    "max": df_train["length"].max(),
-                    "std": df_train["length"].std(),
-                }
-            }
             self.fish_types = []
 
         # 2. Max Dimensions (for scaling)
@@ -94,9 +65,6 @@ class FeatureStep(PipelineStep):
         # To be robust, let's scan the training set images.
 
         # Optimization: We only do this once.
-        raw_dir = self.config["paths"]["raw"]
-        max_w, max_h = 0, 0
-
         # We only need to check if we don't have a cached value?
         # For now, let's just loop. It might be a few thousand images.
         # Checking file headers is fast. But we don't want to depend on 'identify'.
