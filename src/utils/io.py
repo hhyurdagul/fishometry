@@ -1,4 +1,4 @@
-import yaml
+import json
 import polars as pl
 from pathlib import Path
 from typing import Any, Dict
@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 def load_config(config_path: str) -> Dict[str, Any]:
     with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+        return json.load(f)
 
 
 def load_image(image_path: str):

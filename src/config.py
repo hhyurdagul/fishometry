@@ -6,7 +6,7 @@ from pydantic import (
     field_validator
 )
 
-import yaml
+import json
 
 DATA_ROOT = Path("data")
 CONFIG_ROOT = Path("configs")
@@ -85,10 +85,10 @@ class Config(BaseModel):
 def get_valid_configs() -> list[str]:
     configs = []
     for path in CONFIG_ROOT.iterdir():
-        if path.suffix == ".yaml":
+        if path.suffix == ".json":
             with open(path, "r", encoding="utf-8") as f:
                 try:
-                    Config(**yaml.safe_load(f))
+                    Config(**json.load(f))
                     configs.append(path.stem)
                 except Exception:
                     continue
@@ -96,11 +96,11 @@ def get_valid_configs() -> list[str]:
     return sorted(configs)
 
 def get_config(config_name: str) -> Config:
-    config_path = (CONFIG_ROOT / config_name).with_suffix(".yaml")
+    config_path = (CONFIG_ROOT / config_name).with_suffix(".json")
     if not config_path.exists():
         raise ValueError(f"Config `{config_name}` does not exist")
     with open(config_path, "r", encoding="utf-8") as f:
-        return Config(**yaml.safe_load(f))
+        return Config(**json.load(f))
 
 if __name__ == "__main__":
     print(get_valid_configs())
