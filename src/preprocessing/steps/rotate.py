@@ -1,3 +1,4 @@
+from src.config import Config
 import cv2
 import numpy as np
 import polars as pl
@@ -9,18 +10,18 @@ from src.utils.io import load_image, save_image
 
 
 class RotateStep(PipelineStep):
-    def __init__(self, config):
+    def __init__(self, config: Config):
         super().__init__(config)
-        self.input_dir = config["paths"]["raw"]
-        self.output_dir = os.path.join(config["paths"]["output"], "rotated")
+        self.input_dir = config.input_dir
+        self.output_dir = config.output_dir / "rotated"
         os.makedirs(self.output_dir, exist_ok=True)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         names = df["name"].to_list()
 
         for name in tqdm(names, desc="Rotating Images"):
-            image_path = os.path.join(self.input_dir, name)
-            output_path = os.path.join(self.output_dir, name)
+            image_path = self.input_dir / name
+            output_path = self.output_dir / name
 
             if os.path.exists(output_path):
                 continue

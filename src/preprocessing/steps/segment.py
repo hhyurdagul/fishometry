@@ -1,3 +1,4 @@
+import torch
 import os
 import cv2
 import numpy as np
@@ -5,20 +6,21 @@ import polars as pl
 from tqdm import tqdm
 from segment_anything import sam_model_registry, SamPredictor
 from .base import PipelineStep
+from src.config import Config
 
 
 class SegmentStep(PipelineStep):
-    def __init__(self, config):
+    def __init__(self, config: Config, rotated: bool=False):
         super().__init__(config)
-        self.input_dir = os.path.join(config["paths"]["output"], "rotated")
-        self.output_dir = os.path.join(config["paths"]["output"], "segment")
+        self.model_path = config.models.sam
+
+        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
+        self.output_dir = config.output_dir / "segment"
         os.makedirs(self.output_dir, exist_ok=True)
-        self.model_path = config["models"]["sam"]
-        self.device = config["params"]["device"]
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         sam = sam_model_registry["vit_l"](checkpoint=self.model_path)
-        sam.to(self.device)
+        sam.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         predictor = SamPredictor(sam)
 
         names = df["name"].to_list()

@@ -1,3 +1,4 @@
+from src.config import Config
 import os
 import sys
 
@@ -11,16 +12,17 @@ from .base import PipelineStep
 
 
 class DepthStep(PipelineStep):
-    def __init__(self, config):
+    def __init__(self, config: Config, rotated: bool=False):
         super().__init__(config)
-        self.input_dir = os.path.join(config["paths"]["output"], "rotated")
-        self.output_dir = os.path.join(config["paths"]["output"], "depth")
-        os.makedirs(self.output_dir, exist_ok=True)
-        self.device = config["params"]["device"]
+        self.model_path = config.models.depth
+
+        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
+        self.output_dir = config.output_dir / "depth"
+        self.output_dir.mkdir(exist_ok=True)
 
         # V2 repo path
-        v2_path = config["models"].get("depth_v2_repo")
-        if v2_path and v2_path not in sys.path:
+        v2_path = "third_party/Depth-Anything-V2"
+        if v2_path not in sys.path:
             sys.path.append(v2_path)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -99,7 +101,7 @@ class DepthStep(PipelineStep):
 
     def _load_model(self):
         try:
-            from depth_anything_v2.dpt import DepthAnythingV2
+            from depth_anything_v2.dpt import DepthAnythingV2 # type: ignore
 
             model_configs = {
                 "vits": {
@@ -122,22 +124,19 @@ class DepthStep(PipelineStep):
             encoder = "vitl"
             model = DepthAnythingV2(**model_configs[encoder])
 
-            checkpoint_path = os.path.join(
-                "checkpoints", f"depth_anything_v2_{encoder}.pth"
-            )
-            if os.path.exists(checkpoint_path):
-                model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"))
+            if os.path.exists(self.model_path):
+                model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
             else:
                 print(
-                    f"Warning: DepthAnythingV2 weights not found at {checkpoint_path}"
+                    f"Warning: DepthAnythingV2 weights not found at {self.model_path}"
                 )
-                self._download_weights(encoder, checkpoint_path)
-                if os.path.exists(checkpoint_path):
+                self._download_weights(encoder, self.model_path)
+                if os.path.exists(self.model_path):
                     model.load_state_dict(
-                        torch.load(checkpoint_path, map_location="cpu")
+                        torch.load(self.model_path, map_location="cpu")
                     )
 
-            model.to(self.device)
+            model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
             model.eval()
             return model
 

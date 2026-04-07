@@ -1,10 +1,11 @@
 import os
 import torch
-import polars as pl
 import json
+import polars as pl
 from tqdm import tqdm
 from ultralytics import YOLO
-from .base import PipelineStep
+
+from src.preprocessing.steps.base import PipelineStep
 from src.utils.io import load_image, get_raw_name
 from src.config import Config
 
@@ -14,12 +15,11 @@ class YoloStep(PipelineStep):
         super().__init__(config)
         self.rotated = rotated
         self.model_path = config.models.yolo
-        self.conf = config.params.yolo_conf
-        self.input_dir = (
-            config.input_dir
-            if not rotated
-            else config.output_dir / "rotated"
-        )
+
+        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
+        self.output_dir = config.output_dir / "cache" / f"yolo_{'rotated' if self.rotated else 'initial'}"
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+        
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         model = YOLO(self.model_path)
@@ -27,18 +27,12 @@ class YoloStep(PipelineStep):
         coord_data = []
         names = df["name"].to_list()
 
-        # Prepare cache dir
-        cache_dir = os.path.join(
-            self.config.output_dir, "cache", f"yolo_{'rotated' if self.rotated else 'initial'}"
-        )
-        os.makedirs(cache_dir, exist_ok=True)
-
         for name in tqdm(names, desc=f"YOLO {'rotated' if self.rotated else 'initial'}"):
             image_path = os.path.join(self.input_dir, name)
             if not os.path.exists(image_path):
                 continue
 
-            cache_path = os.path.join(cache_dir, f"{name}.json")
+            cache_path = self.output_dir / f"{name}.json"
 
             # Check cache
             if os.path.exists(cache_path):
@@ -110,8 +104,8 @@ class YoloStep(PipelineStep):
 
         return others.nelement() == 1
 
-    def get_prediction(self, model, image_path) -> dict | None:
-        results = model.predict(image_path, conf=self.conf, verbose=False)
+    def get_prediction(self, model: YOLO, image_path: str) -> dict | None:
+        results = model.predict(image_path, conf=0.8, verbose=False)
         if not results:
             return None
 

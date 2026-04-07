@@ -10,15 +10,13 @@ Runs the image preprocessing pipeline including:
 - Feature extraction
 
 Usage:
-    python -m src.preprocessing.run --config configs/config_inside.yaml
-    python -m src.preprocessing.run --config configs/config_inside.yaml --all-splits
+    python -m src.preprocessing.run --dataset-name data-inside
 """
 
 import os
 import polars as pl
 import typer
 from src.config import get_config
-from src.preprocessing.steps.split import SplitStep
 from src.preprocessing.steps.yolo import YoloStep
 from src.preprocessing.steps.rotate import RotateStep
 from src.preprocessing.steps.depth import DepthStep
@@ -31,19 +29,23 @@ app = typer.Typer(add_completion=False, help="Run the preprocessing pipeline.")
 
 def run_pipeline(config):
     print(f"Starting preprocessing pipeline for {config.name}...")
+
+    if not config.split_csv_path.exists():
+        raise FileNotFoundError(f"Run create data module first. {config.split_csv_path} not found.")
+
     config.output_dir.mkdir(exist_ok=True)
+    rotated = config.rotate
 
     # Initialize data
-    df = pl.read_csv(config.input_csv_path).drop_nulls()
+    df = pl.read_csv(config.split_csv_path).drop_nulls()
     steps = [
-        SplitStep(config),
-        # YoloStep(config),
-        # RotateStep(config),
-        # YoloStep(config),
-        # DepthStep(config),
-        # SegmentStep(config),
-        # BlackoutStep(config),
-        # FeatureStep(config),
+        YoloStep(config),
+        RotateStep(config),
+        YoloStep(config, rotated=rotated),
+        DepthStep(config, rotated=rotated),
+        SegmentStep(config, rotated=rotated),
+        BlackoutStep(config, rotated=rotated),
+        FeatureStep(config, rotated=rotated),
     ]
 
     # Run pipeline

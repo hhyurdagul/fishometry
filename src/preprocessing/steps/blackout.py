@@ -1,3 +1,4 @@
+from src.config import Config
 import os
 import cv2
 import numpy as np
@@ -7,13 +8,14 @@ from .base import PipelineStep
 
 
 class BlackoutStep(PipelineStep):
-    def __init__(self, config, canvas_size=(224, 224)):
+    def __init__(self, config: Config, rotated: bool=False, canvas_size=(224, 224)):
         super().__init__(config)
-        self.image_dir = os.path.join(config["paths"]["output"], "rotated")
-        self.mask_dir = os.path.join(config["paths"]["output"], "segment")
-        self.output_dir = os.path.join(config["paths"]["output"], "blackout")
-        os.makedirs(self.output_dir, exist_ok=True)
         self.canvas_size = canvas_size
+    
+        self.image_dir = config.output_dir / "rotated" if rotated else config.input_dir
+        self.mask_dir = config.output_dir / "segment"
+        self.output_dir = config.output_dir / "blackout"
+        os.makedirs(self.output_dir, exist_ok=True)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         names = df["name"].to_list()
