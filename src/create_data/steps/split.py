@@ -2,7 +2,7 @@ import os
 import polars as pl
 import numpy as np
 from src.config import Config
-from src.preprocessing.steps import PipelineStep
+from src.create_data.steps.base import PipelineStep
 
 
 class SplitStep(PipelineStep):
@@ -29,7 +29,7 @@ class SplitStep(PipelineStep):
         return pl.concat([train_df, val_df, test_df])
 
 
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+    def process(self, df: pl.DataFrame) -> tuple[pl.DataFrame, Config]:
         train_ratio = self.config.params.train_ratio
         val_ratio = self.config.params.val_ratio
 
@@ -48,4 +48,4 @@ class SplitStep(PipelineStep):
         else:
             df = self.__split_frame(df, train_ratio, val_ratio)
 
-        return df.sample(fraction=1, shuffle=True)
+        return df.sample(fraction=1, shuffle=True), self.config

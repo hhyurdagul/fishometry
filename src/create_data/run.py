@@ -19,7 +19,6 @@ app = typer.Typer(add_completion=False, help="Run the data creation pipeline.")
 
 def run_pipeline(config, augment):
     print(f"Starting data creation pipeline for {config.name}...")
-    config.output_dir.mkdir(exist_ok=True)
 
     # Initialize data
     df = pl.read_csv(config.input_csv_path).drop_nulls()
@@ -33,12 +32,12 @@ def run_pipeline(config, augment):
     # Run pipeline
     for step in steps:
         print(f"Running {step.__class__.__name__}...")
-        df = step.process(df)
+        df, config = step.process(df)
 
     # Save final result
-    df.write_csv(config.output_csv_path)
+    df.write_csv(config.split_csv_path)
     print(f"Data creation pipeline for {config.name} finished.")
-    print(f"Saved processed data to {config.output_csv_path}")
+    print(f"Saved processed data to {config.split_csv_path}")
 
 @app.command()
 def main(

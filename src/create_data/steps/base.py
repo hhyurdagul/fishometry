@@ -9,5 +9,5 @@ class PipelineStep(ABC):
         self.config = config
 
     @abstractmethod
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+    def process(self, df: pl.DataFrame) -> tuple[pl.DataFrame, Config]:
         pass

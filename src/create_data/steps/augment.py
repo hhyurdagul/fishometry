@@ -3,9 +3,11 @@ import polars as pl
 import numpy as np
 import random
 import cv2
+from pathlib import Path
 from src.config import Config
-from src.preprocessing.steps import PipelineStep
+from src.create_data.steps.base import PipelineStep
 
+np.random.seed(42)
 
 def augment_zoom(
     image: np.ndarray, zoom_type: str = "in", magnitude: float = 0.1
@@ -53,9 +55,14 @@ def augment_zoom(
 class AugmentStep(PipelineStep):
     def __init__(self, config: Config):
         super().__init__(config)
-        np.random.seed(42)
 
     def __create_data(self, df: pl.DataFrame):
+        new_data_dir = Path(str(self.config.input_dir).replace(self.config.name, self.config.name + "-zoom"))
+        new_data_dir.mkdir(parents=True, exist_ok=True)
+        with open(new_data_dir.with_suffix(".csv"), "w") as f:
+            f.write("")
+        
+
         new_config = Config(
             name=self.config.name + "-zoom",
             models=self.config.models,
@@ -82,7 +89,8 @@ class AugmentStep(PipelineStep):
 
             # 1. Original
             dest_img_path = new_config.input_dir / name
-            cv2.imwrite(dest_img_path, img)
+            if not dest_img_path.exists():
+                cv2.imwrite(dest_img_path, img)
             new_rows.append({"name": name, **base_row})
 
             # 2. Zoom In
@@ -95,7 +103,8 @@ class AugmentStep(PipelineStep):
             suffix = int(rin * 100)
             name_in = f"{base_name}-zin-{suffix}{ext}"
 
-            cv2.imwrite(str(new_config.input_dir / name_in), img_in)
+            if not (new_config.input_dir / name_in).exists():
+                cv2.imwrite(str(new_config.input_dir / name_in), img_in)
             new_rows.append({"name": name_in, **base_row})
 
             # 3. Zoom Out
@@ -107,11 +116,12 @@ class AugmentStep(PipelineStep):
             suffix = int(rout * 100)
             name_out = f"{base_name}-zout-{suffix}{ext}"
 
-            cv2.imwrite(str(new_config.input_dir / name_out), img_out)
+            if not (new_config.input_dir / name_out).exists():
+                cv2.imwrite(str(new_config.input_dir / name_out), img_out)
             new_rows.append({"name": name_out, **base_row})
 
-        with open(f"configs/{new_config.name}.yaml", "w") as f:
-            import yaml
+        with open(f"configs/{new_config.name}.json", "w") as f:
+            import json
             model_dump = new_config.model_dump()
             repr_dict = {
                 "name": model_dump["name"],
@@ -120,13 +130,12 @@ class AugmentStep(PipelineStep):
                 "models": model_dump["models"],
                 "params": model_dump["params"],
             }
-            yaml.dump(repr_dict, f)
+            json.dump(repr_dict, f)
 
-        df = pl.DataFrame(new_rows)
-        df.write_csv(new_config.input_csv_path)
-        return df
+        return pl.DataFrame(new_rows), new_config
 
 
-    def process(self, df: pl.DataFrame):
-        df = self.__create_data(df)
-        return df
+    def process(self, df: pl.DataFrame) -> tuple[pl.DataFrame, Config]:
+        df, config = self.__create_data(df)
+        df.write_csv(config.input_csv_path)
+        return df, config
