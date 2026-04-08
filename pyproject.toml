@@ -7,12 +7,14 @@ requires-python = ">=3.10"
 dependencies = [
     "polars>=1.39.3",
     "pydantic>=2.12.5",
+    "scikit-learn>=1.7.2",
     "segment-anything",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
     "tqdm>=4.67.3",
     "typer>=0.24.1",
     "ultralytics>=8.4.35",
+    "xgboost>=3.2.0",
 ]
 
 [tool.uv.sources]

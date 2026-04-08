@@ -7,9 +7,12 @@ Usage:
     python -m src.training.run --pipeline 1 --dataset data-inside
     python -m src.training.run  # Runs default tasks
 """
+from src.training.models import train_baseline, train_linear_model
+from src.config import get_config
 
 import sys
 import subprocess
+import polars as pl
 import typer
 
 app = typer.Typer(add_completion=False, help="Training orchestrator.")
@@ -23,7 +26,7 @@ def run_specific_pipeline(dataset_name, pipeline_id, all_splits=True):
 
     # Run Baseline
     if pipeline_id == 0:
-        cmd = [sys.executable, "-m", "src.training.baseline", "--dataset", dataset_name]
+        cmd = [sys.executable, "-m", "src.training.baseline", "--dataset-name", dataset_name]
         subprocess.run(cmd, check=True)
 
     # Train Models (Linear Regression, XGBoost, MLP)
@@ -240,9 +243,28 @@ def main(
     pipeline: int | None = typer.Option(
         None, min=0, max=6, help="Specific pipeline to run"
     ),
-    dataset: str | None = typer.Option(None, help="Specific dataset"),
+    dataset_name: str = typer.Option(None, help="Specific dataset"),
 ):
-    tasks = []
+    config = get_config(dataset_name)
+    df = pl.read_csv(config.output_csv_path)
+
+    pred_path = config.dataset_dir / "predictions.csv"
+
+    if not pred_path.exists():
+        cols = ["name", "length", "is_train", "is_val", "is_test"]
+        if config.fish_type_available:
+            cols.insert(1, "fish_type")
+
+        df.select(cols).write_csv(pred_path)
+
+
+
+    tasks = [train_baseline, train_linear_model]
+
+    feature_set = "coords"
+    depth = False
+    for task in tasks:
+        task(df, config, feature_set, depth)
 
     # 0: Baseline
     # 1: Regression with coord features
@@ -251,22 +273,22 @@ def main(
     # 4: Regression with depth+coord features
     # 5: Regression with depth+scaled features
     # 6: CNN with depth+scaled features and blackout images
-    if dataset and pipeline is not None:
-        tasks.append((dataset, pipeline))
-    else:
-        tasks.append(("data-inside", 0))
-        tasks.append(("data-inside", 1))
-        tasks.append(("data-inside", 2))
-        tasks.append(("data-inside", 6))
-
-        tasks.append(("data-inside-zoom", 0))
-        tasks.append(("data-inside-zoom", 1))
-        tasks.append(("data-inside-zoom", 2))
-        tasks.append(("data-inside-zoom", 4))
-        tasks.append(("data-inside-zoom", 6))
-
-    for ds, pid in tasks:
-        run_specific_pipeline(ds, pid)
+    # if dataset and pipeline is not None:
+    #     tasks.append((dataset, pipeline))
+    # else:
+    #     tasks.append(("data-inside", 0))
+    #     tasks.append(("data-inside", 1))
+    #     tasks.append(("data-inside", 2))
+    #     tasks.append(("data-inside", 6))
+    #
+    #     tasks.append(("data-inside-zoom", 0))
+    #     tasks.append(("data-inside-zoom", 1))
+    #     tasks.append(("data-inside-zoom", 2))
+    #     tasks.append(("data-inside-zoom", 4))
+    #     tasks.append(("data-inside-zoom", 6))
+    #
+    # for ds, pid in tasks:
+    #     run_specific_pipeline(ds, pid)
 
 
 if __name__ == "__main__":

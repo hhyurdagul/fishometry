@@ -46,30 +46,35 @@ class Config(BaseModel):
     models: ModelConfig
     params: ParamConfig
 
+    @computed_field()
+    @property
+    def dataset_dir(self) -> Path:
+        return DATA_ROOT / self.name
+
     @computed_field
     @property
     def input_csv_path(self) -> Path:
-        return DATA_ROOT / self.name / "raw.csv"
+        return self.dataset_dir / "raw.csv"
 
     @computed_field
     @property
     def split_csv_path(self) -> Path:
-        return DATA_ROOT / self.name / "split.csv"
+        return self.dataset_dir / "split.csv"
 
     @computed_field
     @property
     def output_csv_path(self) -> Path:
-        return DATA_ROOT / self.name / "processed.csv"
+        return self.dataset_dir / "processed.csv"
 
     @computed_field
     @property
     def input_dir(self) -> Path:
-        return DATA_ROOT / self.name / "raw"
+        return self.dataset_dir / "raw"
 
     @computed_field
     @property
     def output_dir(self) -> Path:
-        return DATA_ROOT / self.name / "processed"
+        return self.dataset_dir / "processed"
 
     @model_validator(mode="after")
     def validate(self):
