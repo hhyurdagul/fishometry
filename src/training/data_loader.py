@@ -10,8 +10,8 @@ from typing import List, Tuple, Optional
 
 
 def get_feature_names_and_desc(
-    feature_set: str = "coords",
     model_name: str = "linear",
+    feature_set: str = "coords",
     depth: bool = False,
 ) -> tuple[list[pl.Expr], str]:
     """
@@ -32,16 +32,15 @@ def get_feature_names_and_desc(
     features = [pl.selectors.starts_with("fish_type_")]
     feature_desc = f"{model_name}_{feature_set}"
     # Base Features
-    for fs in feature_set:
-        if fs == "coords":
-            features.append(
-                pl.col([
-                    "img_w","img_h", "Fish_w", "Fish_h", "Fish_w_scaled", 
-                    "Fish_h_scaled", "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
-                ])
-            )
-        elif fs == "eye":
-            features.append(pl.col(["Eye_w", "Eye_h", "Fish_w", "Fish_h"]))
+    if feature_set == "coords":
+        features.append(
+            pl.col([
+                "img_w","img_h", "Fish_w", "Fish_h", "Fish_w_scaled", 
+                "Fish_h_scaled", "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
+            ])
+        )
+    elif feature_set == "eye":
+        features.append(pl.col(["Eye_w", "Eye_h", "Fish_w", "Fish_h"]))
 
     # Depth Features
     if depth:

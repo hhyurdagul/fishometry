@@ -7,7 +7,12 @@ Usage:
     python -m src.training.run --pipeline 1 --dataset data-inside
     python -m src.training.run  # Runs default tasks
 """
-from src.training.models import train_baseline, train_linear_model
+from src.training.models import (
+    train_baseline,
+    train_linear_model,
+    train_mlp_model,
+    train_xgboost_model,
+)
 from src.config import get_config
 
 import sys
@@ -259,10 +264,15 @@ def main(
 
 
 
-    tasks = [train_baseline, train_linear_model]
+    tasks = [
+        train_baseline,
+        train_linear_model,
+        train_xgboost_model,
+        train_mlp_model,
+    ]
 
-    feature_set = "coords"
-    depth = False
+    feature_set = "coords" # coords, eye
+    depth = False # True or False
     for task in tasks:
         task(df, config, feature_set, depth)
 
