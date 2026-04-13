@@ -37,6 +37,7 @@ def build_image_transform() -> transforms.Compose:
 def get_cnn_feature_spec(
     feature_set: str | None,
     depth: bool = False,
+    per_type: bool = False,
 ) -> tuple[list[pl.Expr], str]:
     if feature_set is None:
         feature_desc = "cnn"
@@ -52,9 +53,11 @@ def get_cnn_feature_spec(
                 )
             )
             feature_desc = f"{feature_desc}_depth"
+        if per_type:
+            feature_desc = f"{feature_desc}_per_type"
         return feature_exprs, feature_desc
 
-    return get_feature_names_and_desc("cnn", feature_set, depth)
+    return get_feature_names_and_desc("cnn", feature_set, depth, per_type)
 
 
 def select_aux_features(df: pl.DataFrame, feature_exprs: list[pl.Expr]) -> np.ndarray:
@@ -288,11 +291,12 @@ def run_cnn_pipeline(
     config: Config,
     feature_set: str | None,
     depth: bool = False,
+    per_type: bool = False,
     epochs: int = 100,
     batch_size: int = 16,
     lr: float = 1e-4,
 ) -> pl.DataFrame:
-    feature_exprs, feature_desc = get_cnn_feature_spec(feature_set, depth)
+    feature_exprs, feature_desc = get_cnn_feature_spec(feature_set, depth, per_type)
     image_dir = config.dataset.output_dir / "blackout"
     if not image_dir.exists():
         raise FileNotFoundError(f"Blackout image directory not found: {image_dir}")
@@ -313,10 +317,6 @@ def run_cnn_pipeline(
     pred_dataset = build_image_dataset(df, image_dir, feature_exprs, transform)
 
     print(f"Training {feature_desc} model on {config.dataset.name}...")
-    print(
-        f"Available images: train={len(train_dataset)} "
-        f"val={len(val_dataset)} total={len(pred_dataset)}"
-    )
 
     model = build_cnn_model(
         aux_size=train_dataset.aux_size,
@@ -346,12 +346,14 @@ def train_cnn_model(
     config: Config,
     feature_set: str | None,
     depth: bool = False,
+    per_type: bool = False,
 ) -> pl.DataFrame:
     return run_cnn_pipeline(
         df,
         config,
         feature_set=feature_set,
         depth=depth,
+        per_type=per_type,
         epochs=100,
         batch_size=16,
         lr=1e-4,

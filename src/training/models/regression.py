@@ -175,8 +175,9 @@ def run_model_pipeline(
     config: Config,
     feature_set: str,
     depth: bool = False,
+    per_type: bool = False,
 ) -> pl.DataFrame:
-    features, feature_desc = get_feature_names_and_desc(model_name, feature_set, depth)
+    features, feature_desc = get_feature_names_and_desc(model_name, feature_set, depth, per_type)
 
     X_train = df.filter(pl.col("is_train")).select(features).to_numpy()
     y_train = df.filter(pl.col("is_train")).select("length").to_numpy().ravel()
@@ -219,8 +220,9 @@ def train_linear_model(
     config: Config,
     feature_set: str,
     depth: bool = False,
+    per_type: bool = False,
 ) -> pl.DataFrame:
-    return run_model_pipeline("linear", df, config, feature_set, depth)
+    return run_model_pipeline("linear", df, config, feature_set, depth, per_type)
 
 
 def train_xgboost_model(
@@ -228,13 +230,15 @@ def train_xgboost_model(
     config: Config,
     feature_set: str,
     depth: bool = False,
+    per_type: bool = False,
 ) -> pl.DataFrame:
-    return run_model_pipeline("xgboost", df, config, feature_set, depth)
+    return run_model_pipeline("xgboost", df, config, feature_set, depth, per_type)
 
 def train_mlp_model(
     df: pl.DataFrame,
     config: Config,
     feature_set: str,
     depth: bool = False,
+    per_type: bool = False,
 ) -> pl.DataFrame:
-    return run_model_pipeline("mlp", df, config, feature_set, depth)
+    return run_model_pipeline("mlp", df, config, feature_set, depth, per_type)

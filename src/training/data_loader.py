@@ -13,6 +13,7 @@ def get_feature_names_and_desc(
     model_name: str = "linear",
     feature_set: str = "coords",
     depth: bool = False,
+    per_type: bool = False,
 ) -> tuple[list[pl.Expr], str]:
     """
     Load and prepare data for training.
@@ -53,6 +54,9 @@ def get_feature_names_and_desc(
     if depth:
         features.append(pl.col(["head_center_depth", "fish_center_depth", "tail_center_depth"]))
         feature_desc = f"{feature_desc}_depth"
+
+    if per_type:
+        feature_desc = f"{feature_desc}_per_type"
 
     return features, feature_desc
 
