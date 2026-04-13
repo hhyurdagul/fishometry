@@ -4,7 +4,7 @@ import numpy as np
 import random
 import cv2
 from pathlib import Path
-from src.config import Config
+from src.config import Config, DatasetConfig
 from src.create_data.steps.base import PipelineStep
 
 np.random.seed(42)
@@ -56,18 +56,25 @@ class AugmentStep(PipelineStep):
     def __init__(self, config: Config):
         super().__init__(config)
 
-    def __create_data(self, df: pl.DataFrame):
-        new_data_dir = Path(str(self.config.input_dir).replace(self.config.name, self.config.name + "-zoom"))
+    def __create_data(self, df: pl.DataFrame) -> tuple[pl.DataFrame, Config]:
+        new_data_dir = Path(str(self.config.dataset.input_dir).replace(self.config.dataset.name, self.config.dataset.name + "-zoom"))
         new_data_dir.mkdir(parents=True, exist_ok=True)
         with open(new_data_dir.with_suffix(".csv"), "w") as f:
             f.write("")
         
 
+        dataset_config = DatasetConfig(
+            name=self.config.dataset.name + "-zoom",
+            rotate=self.config.dataset.rotate,
+            fish_type_available=self.config.dataset.fish_type_available,
+            feature_sets=self.config.dataset.feature_sets,
+            depth=self.config.dataset.depth,
+        )
+
         new_config = Config(
-            name=self.config.name + "-zoom",
+            dataset=dataset_config,
             models=self.config.models,
             params=self.config.params,
-            fish_type_available=self.config.fish_type_available,
         )
 
         new_rows = []
@@ -77,7 +84,7 @@ class AugmentStep(PipelineStep):
             # Copy other columns (like length)
             base_row = {k: v for k, v in row.items() if k != "name"}
 
-            src_img_path = self.config.input_dir / name
+            src_img_path = self.config.dataset.input_dir / name
             if not src_img_path.exists():
                 print(f"Image {name} not found, skipping.")
                 continue
@@ -88,7 +95,7 @@ class AugmentStep(PipelineStep):
                 continue
 
             # 1. Original
-            dest_img_path = new_config.input_dir / name
+            dest_img_path = new_config.dataset.input_dir / name
             if not dest_img_path.exists():
                 cv2.imwrite(dest_img_path, img)
             new_rows.append({"name": name, **base_row})
@@ -103,8 +110,8 @@ class AugmentStep(PipelineStep):
             suffix = int(rin * 100)
             name_in = f"{base_name}-zin-{suffix}{ext}"
 
-            if not (new_config.input_dir / name_in).exists():
-                cv2.imwrite(str(new_config.input_dir / name_in), img_in)
+            if not (new_config.dataset.input_dir / name_in).exists():
+                cv2.imwrite(str(new_config.dataset.input_dir / name_in), img_in)
             new_rows.append({"name": name_in, **base_row})
 
             # 3. Zoom Out
@@ -116,11 +123,11 @@ class AugmentStep(PipelineStep):
             suffix = int(rout * 100)
             name_out = f"{base_name}-zout-{suffix}{ext}"
 
-            if not (new_config.input_dir / name_out).exists():
-                cv2.imwrite(str(new_config.input_dir / name_out), img_out)
+            if not (new_config.dataset.input_dir / name_out).exists():
+                cv2.imwrite(str(new_config.dataset.input_dir / name_out), img_out)
             new_rows.append({"name": name_out, **base_row})
 
-        with open(f"configs/{new_config.name}.json", "w") as f:
+        with open(f"configs/{new_config.dataset.name}.json", "w") as f:
             import json
             model_dump = new_config.model_dump()
             repr_dict = {
@@ -137,5 +144,5 @@ class AugmentStep(PipelineStep):
 
     def process(self, df: pl.DataFrame) -> tuple[pl.DataFrame, Config]:
         df, config = self.__create_data(df)
-        df.write_csv(config.input_csv_path)
+        df.write_csv(config.dataset.input_csv_path)
         return df, config

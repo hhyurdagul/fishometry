@@ -33,7 +33,7 @@ class SplitStep(PipelineStep):
         train_ratio = self.config.params.train_ratio
         val_ratio = self.config.params.val_ratio
 
-        if self.config.fish_type_available:
+        if self.config.dataset.fish_type_available:
             fish_types = df["fish_type"].unique().to_list()
             data = []
             for fish_type in fish_types:

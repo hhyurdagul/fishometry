@@ -12,8 +12,8 @@ from src.utils.io import load_image, save_image
 class RotateStep(PipelineStep):
     def __init__(self, config: Config):
         super().__init__(config)
-        self.input_dir = config.input_dir
-        self.output_dir = config.output_dir / "rotated"
+        self.input_dir = config.dataset.input_dir
+        self.output_dir = config.dataset.output_dir / "rotated"
         os.makedirs(self.output_dir, exist_ok=True)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -60,7 +60,7 @@ class RotateStep(PipelineStep):
 
     def rotate_and_crop(self, image_path: str, attr: dict) -> tuple[np.ndarray, dict]:
         image = cv2.imread(image_path)
-        h, w = image.shape[:2]
+        h, w = image.shape[:2] # type: ignore
 
         # 1. Calculate Angle (Tail to Head)
         # We want Tail on Left, Head on Right.
@@ -92,7 +92,7 @@ class RotateStep(PipelineStep):
         M[0, 2] += (new_w / 2) - center[0]
         M[1, 2] += (new_h / 2) - center[1]
 
-        rotated_image = cv2.warpAffine(image, M, (new_w, new_h))
+        rotated_image = cv2.warpAffine(image, M, (new_w, new_h)) # type: ignore
 
         # Check for upside down (if we rotated > 90 degrees)
         # If we rotated by > 90, the fish was facing Left-ish.

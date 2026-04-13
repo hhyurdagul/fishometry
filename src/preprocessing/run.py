@@ -16,7 +16,7 @@ Usage:
 import os
 import polars as pl
 import typer
-from src.config import get_config
+from src.config import get_config, Config
 from src.preprocessing.steps.yolo import YoloStep
 from src.preprocessing.steps.rotate import RotateStep
 from src.preprocessing.steps.depth import DepthStep
@@ -27,17 +27,17 @@ from src.preprocessing.steps.feature import FeatureStep
 app = typer.Typer(add_completion=False, help="Run the preprocessing pipeline.")
 
 
-def run_pipeline(config):
-    print(f"Starting preprocessing pipeline for {config.name}...")
+def run_pipeline(config: Config):
+    print(f"Starting preprocessing pipeline for {config.dataset.name}...")
 
-    if not config.split_csv_path.exists():
-        raise FileNotFoundError(f"Run create data module first. {config.split_csv_path} not found.")
+    if not config.dataset.split_csv_path.exists():
+        raise FileNotFoundError(f"Run create data module first. {config.dataset.split_csv_path} not found.")
 
-    config.output_dir.mkdir(exist_ok=True)
-    rotated = config.rotate
+    config.dataset.output_dir.mkdir(exist_ok=True)
+    rotated = config.dataset.rotate
 
     # Initialize data
-    df = pl.read_csv(config.split_csv_path).drop_nulls()
+    df = pl.read_csv(config.dataset.split_csv_path).drop_nulls()
     steps = [
         YoloStep(config),
         RotateStep(config),
@@ -54,9 +54,9 @@ def run_pipeline(config):
         df = step.process(df)
 
     # Save final result
-    df.write_csv(config.output_csv_path)
-    print(f"Preprocessing pipeline for {config.name} finished.")
-    print(f"Saved processed data to {config.output_csv_path}")
+    df.write_csv(config.dataset.output_csv_path)
+    print(f"Preprocessing pipeline for {config.dataset.name} finished.")
+    print(f"Saved processed data to {config.dataset.output_csv_path}")
 
 @app.command()
 def main(

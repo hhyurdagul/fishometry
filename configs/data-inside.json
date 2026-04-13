@@ -1,7 +1,11 @@
 {
-  "name": "data-inside",
-  "rotate": true,
-  "fish_type_available": false,
+  "dataset": {
+    "name": "data-inside",
+    "rotate": true,
+    "fish_type_available": false,
+    "feature_sets": ["eye", "coords", "scaled"],
+    "depth": [true, false]
+  },
   "models": {
     "yolo": "checkpoints/yolo11m-inside_fish_model.pt",
     "sam": "checkpoints/sam.pth",
@@ -12,5 +16,4 @@
     "val_ratio": 0.15,
     "test_ratio": 0.15
   }
-}
 }

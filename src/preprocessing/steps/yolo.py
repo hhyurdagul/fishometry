@@ -16,8 +16,8 @@ class YoloStep(PipelineStep):
         self.rotated = rotated
         self.model_path = config.models.yolo
 
-        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
-        self.output_dir = config.output_dir / "cache" / f"yolo_{'rotated' if self.rotated else 'initial'}"
+        self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
+        self.output_dir = config.dataset.output_dir / "cache" / f"yolo_{'rotated' if self.rotated else 'initial'}"
         self.output_dir.mkdir(exist_ok=True, parents=True)
         
 

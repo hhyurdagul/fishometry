@@ -1,7 +1,11 @@
 {
-  "name": "data-outside",
-  "rotate": true,
-  "fish_type_available": true,
+  "dataset": {
+    "name": "data-outside",
+    "rotate": true,
+    "fish_type_available": true,
+    "feature_sets": ["coords", "scaled"],
+    "depth": [true, false]
+  },
   "models": {
     "yolo": "checkpoints/yolov11m-all_fish_model.pt",
     "sam": "checkpoints/sam.pth",

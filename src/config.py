@@ -37,14 +37,12 @@ class ParamConfig(BaseModel):
         return self
 
 
-
-
-class Config(BaseModel):
+class DatasetConfig(BaseModel):
     name: str
     rotate: bool = True
     fish_type_available: bool = False
-    models: ModelConfig
-    params: ParamConfig
+    feature_sets: list[str] = ["coords", "scaled"]
+    depth: list[bool] = [True, False]
 
     @computed_field()
     @property
@@ -85,6 +83,18 @@ class Config(BaseModel):
         if not self.input_csv_path.exists():
             raise ValueError(f"File `raw.csv` does not exist")
         return self
+
+
+class Config(BaseModel):
+    models: ModelConfig
+    params: ParamConfig
+    dataset: DatasetConfig
+
+    def __repr__(self):
+        return f"Config(dataset={self.dataset.name})"
+
+    def __str__(self):
+        return self.__repr__()
 
 
 def get_valid_configs() -> list[str]:

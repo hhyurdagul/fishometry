@@ -14,8 +14,8 @@ class SegmentStep(PipelineStep):
         super().__init__(config)
         self.model_path = config.models.sam
 
-        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
-        self.output_dir = config.output_dir / "segment"
+        self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
+        self.output_dir = config.dataset.output_dir / "segment"
         os.makedirs(self.output_dir, exist_ok=True)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:

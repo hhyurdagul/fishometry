@@ -175,7 +175,7 @@ def run_model_pipeline(
     config: Config,
     feature_set: str,
     depth: bool = False,
-) -> None:
+) -> pl.DataFrame:
     features, feature_desc = get_feature_names_and_desc(model_name, feature_set, depth)
 
     X_train = df.filter(pl.col("is_train")).select(features).to_numpy()
@@ -184,7 +184,7 @@ def run_model_pipeline(
     X_val = df.filter(pl.col("is_val")).select(features).to_numpy()
     y_val = df.filter(pl.col("is_val")).select("length").to_numpy().ravel()
 
-    print(f"Training {feature_desc} model on {config.name}...")
+    print(f"Training {feature_desc} model on {config.dataset.name}...")
     
     if model_name == "linear":
         model = build_linear_model()
@@ -196,18 +196,7 @@ def run_model_pipeline(
         model = build_mlp_model(X_train.shape[1])
         model.fit(X_train, y_train, X_val, y_val)
 
-    pred = model.predict(df.select(features).to_numpy())
-
-    pred_df = (
-        df.with_columns(pl.lit(pred).round(2).alias(feature_desc))
-        .select("name", feature_desc)
-    )
-
-    pred_path = config.dataset_dir / "predictions.csv"
-    saved_df = pl.read_csv(pred_path).drop(feature_desc, strict=False)
-    saved_df.join(pred_df, on="name", how="left").write_csv(pred_path)
-
-    model_dir = os.path.join("checkpoints", config.name)
+    model_dir = os.path.join("checkpoints", config.dataset.name)
     os.makedirs(model_dir, exist_ok=True)
 
     if isinstance(model, MLPRegressor):
@@ -215,6 +204,13 @@ def run_model_pipeline(
     else:
         joblib.dump(model, os.path.join(model_dir, feature_desc + ".joblib"))
     
+    pred = pl.DataFrame({
+        "name": df["name"].to_numpy(), 
+        feature_desc: model.predict(df.select(features).to_numpy())
+    })
+
+    return pred
+
 
 
 
@@ -223,8 +219,8 @@ def train_linear_model(
     config: Config,
     feature_set: str,
     depth: bool = False,
-) -> None:
-    run_model_pipeline("linear", df, config, feature_set, depth)
+) -> pl.DataFrame:
+    return run_model_pipeline("linear", df, config, feature_set, depth)
 
 
 def train_xgboost_model(
@@ -232,13 +228,13 @@ def train_xgboost_model(
     config: Config,
     feature_set: str,
     depth: bool = False,
-) -> None:
-    run_model_pipeline("xgboost", df, config, feature_set, depth)
+) -> pl.DataFrame:
+    return run_model_pipeline("xgboost", df, config, feature_set, depth)
 
 def train_mlp_model(
     df: pl.DataFrame,
     config: Config,
     feature_set: str,
     depth: bool = False,
-) -> None:
-    run_model_pipeline("mlp", df, config, feature_set, depth)
+) -> pl.DataFrame:
+    return run_model_pipeline("mlp", df, config, feature_set, depth)

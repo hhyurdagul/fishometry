@@ -16,8 +16,8 @@ class DepthStep(PipelineStep):
         super().__init__(config)
         self.model_path = config.models.depth
 
-        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
-        self.output_dir = config.output_dir / "depth"
+        self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
+        self.output_dir = config.dataset.output_dir / "depth"
         self.output_dir.mkdir(exist_ok=True)
 
         # V2 repo path
@@ -71,7 +71,7 @@ class DepthStep(PipelineStep):
             # Run inference
             try:
                 image = cv2.imread(image_path)
-                h, w = image.shape[:2]
+                h, w = image.shape[:2] # type: ignore
 
                 depth = model.infer_image(image)
 

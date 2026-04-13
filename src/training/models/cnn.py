@@ -34,20 +34,6 @@ def build_image_transform() -> transforms.Compose:
         ]
     )
 
-
-def ensure_predictions_csv(df: pl.DataFrame, config: Config) -> Path:
-    pred_path = config.dataset_dir / "predictions.csv"
-    if pred_path.exists():
-        return pred_path
-
-    cols = ["name", "length", "is_train", "is_val", "is_test"]
-    if config.fish_type_available and "fish_type" in df.columns:
-        cols.insert(1, "fish_type")
-
-    df.select(cols).write_csv(pred_path)
-    return pred_path
-
-
 def get_cnn_feature_spec(
     feature_set: str | None,
     depth: bool = False,
@@ -305,9 +291,9 @@ def run_cnn_pipeline(
     epochs: int = 100,
     batch_size: int = 16,
     lr: float = 1e-4,
-) -> None:
+) -> pl.DataFrame:
     feature_exprs, feature_desc = get_cnn_feature_spec(feature_set, depth)
-    image_dir = config.output_dir / "blackout"
+    image_dir = config.dataset.output_dir / "blackout"
     if not image_dir.exists():
         raise FileNotFoundError(f"Blackout image directory not found: {image_dir}")
 
@@ -326,7 +312,7 @@ def run_cnn_pipeline(
     )
     pred_dataset = build_image_dataset(df, image_dir, feature_exprs, transform)
 
-    print(f"Training {feature_desc} model on {config.name}...")
+    print(f"Training {feature_desc} model on {config.dataset.name}...")
     print(
         f"Available images: train={len(train_dataset)} "
         f"val={len(val_dataset)} total={len(pred_dataset)}"
@@ -341,20 +327,18 @@ def run_cnn_pipeline(
     model.fit(train_dataset, val_dataset)
     pred = model.predict(pred_dataset)
 
-    pred_df = pl.DataFrame(
+    model_dir = Path("checkpoints") / config.dataset.name
+    model_dir.mkdir(parents=True, exist_ok=True)
+    model.save(str(model_dir / f"{feature_desc}.pth"))
+
+    pred = pl.DataFrame(
         {
-            "name": pred_dataset.names,
+            "name": df["name"].to_numpy(),
             feature_desc: np.round(pred, 2),
         }
     )
 
-    pred_path = ensure_predictions_csv(df, config)
-    saved_df = pl.read_csv(pred_path).drop(feature_desc, strict=False)
-    saved_df.join(pred_df, on="name", how="left").write_csv(pred_path)
-
-    model_dir = Path("checkpoints") / config.name
-    model_dir.mkdir(parents=True, exist_ok=True)
-    model.save(str(model_dir / f"{feature_desc}.pth"))
+    return pred
 
 
 def train_cnn_model(
@@ -362,8 +346,8 @@ def train_cnn_model(
     config: Config,
     feature_set: str | None,
     depth: bool = False,
-) -> None:
-    run_cnn_pipeline(
+) -> pl.DataFrame:
+    return run_cnn_pipeline(
         df,
         config,
         feature_set=feature_set,

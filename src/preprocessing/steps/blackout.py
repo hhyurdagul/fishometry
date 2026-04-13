@@ -12,9 +12,9 @@ class BlackoutStep(PipelineStep):
         super().__init__(config)
         self.canvas_size = canvas_size
     
-        self.image_dir = config.output_dir / "rotated" if rotated else config.input_dir
-        self.mask_dir = config.output_dir / "segment"
-        self.output_dir = config.output_dir / "blackout"
+        self.image_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
+        self.mask_dir = config.dataset.output_dir / "segment"
+        self.output_dir = config.dataset.output_dir / "blackout"
         os.makedirs(self.output_dir, exist_ok=True)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:

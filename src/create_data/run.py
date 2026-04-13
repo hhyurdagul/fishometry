@@ -10,18 +10,18 @@ Usage:
 import os
 import polars as pl
 import typer
-from src.config import get_config
+from src.config import get_config, Config
 from src.create_data.steps.split import SplitStep
 from src.create_data.steps.augment import AugmentStep
 
 app = typer.Typer(add_completion=False, help="Run the data creation pipeline.")
 
 
-def run_pipeline(config, augment):
-    print(f"Starting data creation pipeline for {config.name}...")
+def run_pipeline(config: Config, augment: bool):
+    print(f"Starting data creation pipeline for {config.dataset.name}...")
 
     # Initialize data
-    df = pl.read_csv(config.input_csv_path).drop_nulls()
+    df = pl.read_csv(config.dataset.input_csv_path).drop_nulls()
     steps = [
         SplitStep(config)
     ]
@@ -35,9 +35,9 @@ def run_pipeline(config, augment):
         df, config = step.process(df)
 
     # Save final result
-    df.write_csv(config.split_csv_path)
-    print(f"Data creation pipeline for {config.name} finished.")
-    print(f"Saved processed data to {config.split_csv_path}")
+    df.write_csv(config.dataset.split_csv_path)
+    print(f"Data creation pipeline for {config.dataset.name} finished.")
+    print(f"Saved processed data to {config.dataset.split_csv_path}")
 
 @app.command()
 def main(

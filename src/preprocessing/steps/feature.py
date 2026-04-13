@@ -9,15 +9,9 @@ from .base import PipelineStep
 class FeatureStep(PipelineStep):
     def __init__(self, config: Config, rotated: bool=False):
         super().__init__(config)
-        self.input_dir = config.output_dir / "rotated" if rotated else config.input_dir
+        self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
 
     def _get_max_dims(self, names):
-        # This might be slow. Is there a better way?
-        # Maybe we can just store the max dim in a config or cache?
-        # For now, let's assume standard maxes or scan.
-        # To avoid being too slow, let's limit the scan or use a known max if possible.
-        # But precise scaling requires precise max.
-
         # Let's use `identify` if available (Linux) for speed?
         # Or just PIL Image.open(path).size (lazy load).
         from PIL import Image
@@ -26,7 +20,7 @@ class FeatureStep(PipelineStep):
         # Check first 100 to guess? No, unsafe.
         # Let's checks all.
 
-        cache_path = self.config.output_dir / "cache" / "max_dims.json"
+        cache_path = self.config.dataset.output_dir / "cache" / "max_dims.json"
         if cache_path.exists():
             with open(cache_path, "r") as f:
                 d = json.load(f)
@@ -69,7 +63,7 @@ class FeatureStep(PipelineStep):
             )
 
         # 3. Fish Type Encoding & Stats
-        if self.config.fish_type_available:
+        if self.config.dataset.fish_type_available:
             # One-hot encoding
             # We use self.fish_types to determine columns.
             for ft in df["fish_type"].unique():
