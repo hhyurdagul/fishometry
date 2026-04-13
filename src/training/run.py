@@ -12,6 +12,7 @@ from src.training.models import (
     train_linear_model,
     train_mlp_model,
     train_xgboost_model,
+    train_cnn_model,
 )
 from src.config import get_config
 
@@ -269,10 +270,11 @@ def main(
         train_linear_model,
         train_xgboost_model,
         train_mlp_model,
+        train_cnn_model,
     ]
 
     feature_set = "coords" # coords, eye
-    depth = False # True or False
+    depth = True # True or False
     for task in tasks:
         task(df, config, feature_set, depth)
 
