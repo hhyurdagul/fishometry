@@ -36,17 +36,18 @@ def get_feature_names_and_desc(
     if feature_set == "coords":
         features.append(
             pl.col([
-                "img_w","img_h", "Fish_w", "Fish_h", "Fish_w_scaled", 
-                "Fish_h_scaled", "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
+                "img_w","img_h", "Fish_w", "Fish_h",
+                "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
             ])
         )
     if feature_set == "scaled":
         features.append(
             pl.col([
-                "img_w","img_h", "Fish_w", "Fish_h",
-                "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
+                "img_w","img_h", "Fish_w", "Fish_h", "Fish_w_scaled", 
+                "Fish_h_scaled", "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
             ])
         )
+
     elif feature_set == "eye":
         features.append(pl.col(["Eye_w", "Eye_h", "Fish_w", "Fish_h"]))
 
