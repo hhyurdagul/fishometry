@@ -3,7 +3,7 @@
     "name": "data-inside",
     "rotate": true,
     "fish_type_available": false,
-    "feature_sets": ["eye", "coords", "scaled"],
+    "feature_sets": ["eye", "coords"],
     "depth": [true, false]
   },
   "models": {

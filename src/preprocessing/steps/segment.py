@@ -12,97 +12,145 @@ from src.config import Config
 class SegmentStep(PipelineStep):
     def __init__(self, config: Config, rotated: bool=False):
         super().__init__(config)
-        self.model_path = config.models.sam
-
+        self.predictor_loaded = False
         self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
         self.output_dir = config.dataset.output_dir / "segment"
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        sam = sam_model_registry["vit_l"](checkpoint=self.model_path)
+
+    def _get_segmentation_model(self, model_path: str) -> SamPredictor:
+        sam = sam_model_registry["vit_l"](checkpoint=model_path)
         sam.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-        predictor = SamPredictor(sam)
+        return SamPredictor(sam)
 
-        names = df["name"].to_list()
 
-        for name in tqdm(names, desc="Segmentation"):
-            image_path = os.path.join(self.input_dir, name)
+    def _get_mask(self, image_path: str, points: np.ndarray) -> np.ndarray:
 
-            # Standardize naming: append .npy
-            output_name = name + ".npy"
-            output_path = os.path.join(self.output_dir, output_name)
+        if not self.predictor_loaded:
+            # To kill the overhead of loading the model if all the images are cached
+            self.predictor = self._get_segmentation_model(self.config.models.sam)
+            self.predictor_loaded = True
 
-            if os.path.exists(output_path):
-                continue
-
-            if not os.path.exists(image_path):
-                continue
-
-            # Get bbox from DF (rotated)
-            row = df.filter(pl.col("name") == name)
-            if row.height == 0:
-                continue
-
-            # Assuming columns are present.
-            # We need the Fish bbox.
-            # Fish_x1, Fish_y1, ...
-
-            try:
-                data = row.to_dicts()[0]
-
-                # Check for required Head/Tail cols
-                required = [
-                    "Head_x1",
-                    "Head_x2",
-                    "Head_y1",
-                    "Head_y2",
-                    "Tail_x1",
-                    "Tail_x2",
-                    "Tail_y1",
-                    "Tail_y2",
-                ]
-                if any(r not in data or data[r] is None for r in required):
-                    # Fallback to Fish center if head/tail missing?
-                    # User requested Head/Tail. If missing, maybe skip or fallback.
-                    # Let's skip for now or try Fish center as backup?
-                    # Prompt implies strict requirement. Let's skip if missing.
-                    print(f"Skipping {name} due to missing Head/Tail coordinates.")
-                    continue
-
-                # Calculate centers
-                h_cx = (data["Head_x1"] + data["Head_x2"]) / 2
-                h_cy = (data["Head_y1"] + data["Head_y2"]) / 2
-
-                t_cx = (data["Tail_x1"] + data["Tail_x2"]) / 2
-                t_cy = (data["Tail_y1"] + data["Tail_y2"]) / 2
-
-                points = np.array([[h_cx, h_cy], [t_cx, t_cy]])
-
-                mask = self.get_mask(predictor, image_path, points)
-
-                # Save explicitly
-                np.save(output_path, mask)
-            except Exception as e:
-                print(f"Error segmenting {name}: {e}")
-
-        return df
-
-    def get_mask(self, predictor, image_path, points):
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError(f"Could not read image: {image_path}")
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        predictor.set_image(image)
+        self.predictor.set_image(image)
 
         # points shape: (N, 2)
         # labels: (N,) -> 1 for foreground
         labels = np.ones(len(points))
 
-        masks, _, _ = predictor.predict(
+        masks, _, _ = self.predictor.predict(
             point_coords=points,
             point_labels=labels,
             box=None,
             multimask_output=False,
         )
         return masks[0]
+
+
+    def _extract_geometric_features(self, mask: np.ndarray) -> dict:
+        # Mask is binary
+        mask_uint8 = (mask > 0).astype(np.uint8) * 255
+        
+        # 2. Find the contours (the boundary lines) of the mask
+        # RETR_EXTERNAL ensures we only get the outer boundary, ignoring any holes inside the fish
+        contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Safety check in case SAM failed to generate a mask
+        if not contours:
+            return {"area": 0, "perimeter": 0, "major_axis": 0, "minor_axis": 0, "solidity": 0}
+            
+        # Grab the largest contour (to ignore any small noise artifacts SAM might have picked up)
+        fish_contour = max(contours, key=cv2.contourArea) # type: ignore
+        
+        # --- Feature Calculations ---
+        
+        # Mask Area
+        area = cv2.contourArea(fish_contour)
+        
+        # Perimeter (True means the contour is closed)
+        perimeter = cv2.arcLength(fish_contour, True)
+        
+        # Major and Minor Axes
+        # cv2.fitEllipse requires at least 5 points to fit an ellipse mathematically
+        if len(fish_contour) >= 5:
+            # returns: (center(x, y), (minor_axis, major_axis), angle_of_rotation)
+            _, (minor_axis, major_axis), _ = cv2.fitEllipse(fish_contour)
+        else:
+            major_axis, minor_axis = 0, 0
+            
+        # Solidity
+        # First, find the convex hull (the tightest polygon wrapped around the contour)
+        hull = cv2.convexHull(fish_contour)
+        hull_area = cv2.contourArea(hull)
+        
+        # Solidity is the ratio of the actual area to the hull area
+        solidity = area / hull_area if hull_area > 0 else 0
+        
+        return {
+            "mask_area": area,
+            "mask_perimeter": perimeter,
+            "major_axis": major_axis,
+            "minor_axis": minor_axis,
+            "solidity": solidity
+        }
+
+
+    def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
+        rows = df.select(
+            "name",
+            "Head_x1",
+            "Head_x2",
+            "Head_y1",
+            "Head_y2",
+            "Tail_x1",
+            "Tail_x2",
+            "Tail_y1",
+            "Tail_y2",
+        ).rows(named=True) # type: dict
+
+
+        data = []
+        for row in tqdm(rows, desc="Segmentation"):
+            if not all(row.values()):
+                print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+
+            name = row["name"]
+            image_path = self.input_dir / name
+            output_path = self.output_dir / name + ".npy"
+
+            if not image_path.exists():
+                continue
+
+            try:
+                if output_path.exists():
+                    mask = np.load(output_path)
+                else:
+                    # Calculate centers
+                    h_cx = (row["Head_x1"] + row["Head_x2"]) / 2
+                    h_cy = (row["Head_y1"] + row["Head_y2"]) / 2
+                    t_cx = (row["Tail_x1"] + row["Tail_x2"]) / 2
+                    t_cy = (row["Tail_y1"] + row["Tail_y2"]) / 2
+
+                    points = np.array([[h_cx, h_cy], [t_cx, t_cy]])
+                    mask = self._get_mask(image_path, points)
+                    np.save(output_path, mask)
+
+                features = self._extract_geometric_features(mask)
+                features["name"] = name
+                data.append(features)
+
+            except Exception as e:
+                print(f"Error segmenting {name}: {e}")
+                continue
+            
+
+        return df.join(pl.DataFrame(data), on="name", how="left")
+
+
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        return df.pipe(self._process_images)
+

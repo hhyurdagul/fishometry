@@ -64,10 +64,10 @@ def main(
 
 
     tasks = [
-        train_linear_model,
+        # train_linear_model,
         train_xgboost_model,
-        train_mlp_model,
-        train_cnn_model,
+        # train_mlp_model,
+        # train_cnn_model,
     ]
 
     feature_sets = config.dataset.feature_sets

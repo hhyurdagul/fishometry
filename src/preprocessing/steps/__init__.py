@@ -6,7 +6,6 @@ from .depth import DepthStep
 from .segment import SegmentStep
 from .blackout import BlackoutStep
 from .feature import FeatureStep
-from .visualize import VisualizeStep
 
 __all__ = [
     "PipelineStep",
@@ -16,5 +15,4 @@ __all__ = [
     "SegmentStep",
     "BlackoutStep",
     "FeatureStep",
-    "VisualizeStep",
 ]

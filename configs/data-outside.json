@@ -3,7 +3,7 @@
     "name": "data-outside",
     "rotate": true,
     "fish_type_available": true,
-    "feature_sets": ["coords", "scaled"],
+    "feature_sets": ["coords", "features"],
     "depth": [true, false]
   },
   "models": {
