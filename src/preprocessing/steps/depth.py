@@ -1,6 +1,6 @@
-from src.config import Config
 import os
 import sys
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -8,185 +8,158 @@ import polars as pl
 import torch
 from tqdm import tqdm
 
-from .base import PipelineStep
+from src.config import Config
+from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_coord
+
+# V2 repo path
+v2_path = "third_party/Depth-Anything-V2"
+if v2_path not in sys.path:
+    sys.path.append(v2_path)
+
+from depth_anything_v2.dpt import DepthAnythingV2  # type: ignore
 
 
-class DepthStep(PipelineStep):
-    def __init__(self, config: Config, rotated: bool=False):
-        super().__init__(config)
-        self.model_path = config.models.depth
+class DepthModel:
+    def __init__(self, model_path: Path | str):
+        self.model: DepthAnythingV2
+        self.model_initialized = False
+        self.model_path = model_path
 
-        self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
-        self.output_dir = config.dataset.output_dir / "depth"
-        self.output_dir.mkdir(exist_ok=True)
-
-        # V2 repo path
-        v2_path = "third_party/Depth-Anything-V2"
-        if v2_path not in sys.path:
-            sys.path.append(v2_path)
-
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        names = df["name"].to_list()
-        missing = [
-            name
-            for name in names
-            if not os.path.exists(os.path.join(self.output_dir, name + ".npy"))
-        ]
-
-        model = None
-        if missing:
-            print(f"Processing Depth Model: v2 (Missing {len(missing)}/{len(names)})")
-            model = self._load_model()
-            if model is None:
-                print(
-                    "Skipping generation due to load failure. Will process existing only."
-                )
-        else:
-            print(f"Depth Model v2: All {len(names)} files exist. Skipping model load.")
-
-        results = []
-
-        for name in tqdm(names, desc="Depth V2"):
-            image_path = os.path.join(self.input_dir, name)
-            output_path = os.path.join(self.output_dir, name + ".npy")
-
-            # Try to load existing depth map
-            if os.path.exists(output_path):
-                try:
-                    depth = np.load(output_path)
-                    entry = self._extract_metrics(df, name, depth)
-                    results.append(entry)
-                    continue
-                except Exception as e:
-                    print(f"Error reading {output_path}: {e}")
-                    if model is None:
-                        continue
-
-            if not os.path.exists(image_path):
-                continue
-
-            if model is None:
-                continue
-
-            # Run inference
-            try:
-                image = cv2.imread(image_path)
-                h, w = image.shape[:2] # type: ignore
-
-                depth = model.infer_image(image)
-
-                if depth.shape != (h, w):
-                    depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_LINEAR)
-
-                np.save(output_path, depth)
-
-                entry = self._extract_metrics(df, name, depth)
-                results.append(entry)
-
-            except Exception as e:
-                print(f"Error executing depth inference on {name}: {e}")
-
-        # Cleanup
-        if model is not None:
-            del model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        # Merge results into dataframe
-        if results:
-            results_df = pl.DataFrame(results)
-            df = df.join(results_df, on="name", how="left")
-
-        return df
-
-    def _load_model(self):
-        try:
-            from depth_anything_v2.dpt import DepthAnythingV2 # type: ignore
-
-            model_configs = {
-                "vits": {
-                    "encoder": "vits",
-                    "features": 64,
-                    "out_channels": [48, 96, 192, 384],
-                },
-                "vitb": {
-                    "encoder": "vitb",
-                    "features": 128,
-                    "out_channels": [96, 192, 384, 768],
-                },
-                "vitl": {
-                    "encoder": "vitl",
-                    "features": 256,
-                    "out_channels": [256, 512, 1024, 1024],
-                },
+    def _get_depth_model(self) -> DepthAnythingV2:
+        model = DepthAnythingV2(
+            {
+                "encoder": "vitl",
+                "features": 256,
+                "out_channels": [256, 512, 1024, 1024],
             }
+        )
 
-            encoder = "vitl"
-            model = DepthAnythingV2(**model_configs[encoder])
+        if os.path.exists(self.model_path):
+            model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
+        else:
+            print(f"Warning: DepthAnythingV2 weights not found at {self.model_path}")
 
+            torch.hub.download_url_to_file(
+                "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
+                str(self.model_path),
+            )
             if os.path.exists(self.model_path):
                 model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
-            else:
-                print(
-                    f"Warning: DepthAnythingV2 weights not found at {self.model_path}"
-                )
-                self._download_weights(encoder, self.model_path)
-                if os.path.exists(self.model_path):
-                    model.load_state_dict(
-                        torch.load(self.model_path, map_location="cpu")
-                    )
 
-            model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-            model.eval()
-            return model
+        model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        model.eval()
+        return model
 
-        except Exception as e:
-            print(f"Could not load DepthAnythingV2: {e}")
-            import traceback
+    def get_depth_map(self, image: np.ndarray) -> np.ndarray:
+        if not self.model_loaded:
+            # To kill the overhead of loading the model if all the images are cached
+            self.model = self._get_depth_model()
+            self.model_loaded = True
 
-            traceback.print_exc()
-            return None
+        if self.model is None:
+            raise ValueError("Could not load DepthAnythingV2 model")
 
-    def _download_weights(self, encoder: str, path: str):
-        print(f"Downloading DepthAnythingV2 {encoder} weights to {path}...")
-        url_map = {
-            "vits": "https://huggingface.co/depth-anything/Depth-Anything-V2-Small/resolve/main/depth_anything_v2_vits.pth",
-            "vitb": "https://huggingface.co/depth-anything/Depth-Anything-V2-Base/resolve/main/depth_anything_v2_vitb.pth",
-            "vitl": "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
+        h, w = image.shape[:2]
+        depth = self.model.infer_image(image)
+
+        if depth.shape != (h, w):
+            depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_LINEAR)
+
+        return depth
+
+
+
+class DepthStep:
+    def __init__(self, config: Config, rotated: bool = False):
+        self.input_dir = (
+            config.dataset.output_dir / "rotated"
+            if rotated
+            else config.dataset.input_dir
+        )
+        self.output_dir = config.dataset.output_dir / "depth"
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        self.depth_model = DepthModel(config.models.depth)
+
+
+    def _get_depth_map(self, image_path: Path, output_path: Path) -> np.ndarray:
+        if output_path.exists():
+            depth = np.load(output_path)
+        else:
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Could not read image: {image_path}")
+
+            depth = self.depth_model.get_depth_map(image)
+            np.save(output_path, depth)
+        return depth
+
+        
+    def _get_robust_depth(
+        self, depth_map: np.ndarray, x: int, y: int, patch_size: int = 5
+    ) -> float:
+        """
+        Extracts the median depth around a specific coordinate to avoid single-pixel noise.
+        """
+        h, w = depth_map.shape
+        half_patch = patch_size // 2
+
+        # Define bounding box for the patch, ensuring it stays within image boundaries
+        y_min = max(0, y - half_patch)
+        y_max = min(h, y + half_patch + 1)
+        x_min = max(0, x - half_patch)
+        x_max = min(w, x + half_patch + 1)
+
+        # Extract the patch from the depth map
+        patch = depth_map[y_min:y_max, x_min:x_max]
+
+        # Return the median value of the patch
+        return np.median(patch)
+
+    def _extract_metrics(self, data: dict, depth: np.ndarray) -> dict:
+        head_cx, head_cy = get_center_coord(data, "Head")
+        body_cx, body_cy = get_center_coord(data, "Body")
+        tail_cx, tail_cy = get_center_coord(data, "Tail")
+
+        head_depth = self._get_robust_depth(depth, head_cx, head_cy, 9)
+        body_depth = self._get_robust_depth(depth, body_cx, body_cy, 9)
+        tail_depth = self._get_robust_depth(depth, tail_cx, tail_cy, 9)
+        depth_gradient = head_depth = tail_depth
+
+        return {
+            "name": data["name"],
+            "head_depth": head_depth,
+            "body_depth": body_depth,
+            "tail_depth": tail_depth,
+            "depth_gradient_raw": depth_gradient,
+            "depth_gradient_abs": abs(depth_gradient),
         }
 
-        if encoder not in url_map:
-            print(f"Unknown encoder '{encoder}' for auto-download.")
-            return
+    def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: ignore
 
-        try:
-            torch.hub.download_url_to_file(url_map[encoder], path)
-        except Exception as e:
-            print(f"Failed to download weights: {e}")
+        data = []
+        for data in tqdm(rows, desc="Depth Estimation"):
+            if not all(data.values()):
+                print(f"Skipping {data['name']} due to missing Head/Tail coordinates.")
 
-    def _extract_metrics(self, df: pl.DataFrame, name: str, depth: np.ndarray) -> dict:
-        row = df.filter(pl.col("name") == name)
-        metrics = {"name": name}
+            name = data["name"]
+            image_path = self.input_dir / name
+            output_path = self.output_dir / (name + ".npy")
 
-        if row.height == 0:
-            return metrics
+            if not image_path.exists():
+                continue
 
-        data = row.to_dicts()[0]
+            try:
+                depth = self._get_depth_map(image_path, output_path)
+                features = self._extract_metrics(data, depth)
+                data.append(features)
 
-        def get_center_depth(prefix: str):
-            x1_key = f"{prefix}_x1"
-            if x1_key not in data:
-                return None
+            except Exception as e:
+                print(f"Error processing depth for {name}: {e}")
+                continue
 
-            cx = int((data[f"{prefix}_x1"] + data[f"{prefix}_x2"]) / 2)
-            cy = int((data[f"{prefix}_y1"] + data[f"{prefix}_y2"]) / 2)
+        return df.join(pl.DataFrame(data), on="name", how="left") if data else df
 
-            if 0 <= cy < depth.shape[0] and 0 <= cx < depth.shape[1]:
-                return float(depth[cy, cx])
-            return None
-
-        metrics["fish_center_depth"] = get_center_depth("Fish")
-        metrics["head_center_depth"] = get_center_depth("Head")
-        metrics["tail_center_depth"] = get_center_depth("Tail")
-
-        return metrics
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        return df.pipe(self._process_images)

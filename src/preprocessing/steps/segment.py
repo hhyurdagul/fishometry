@@ -59,10 +59,10 @@ class SegmentStep:
         if output_path.exists():
             mask = np.load(output_path)
         else:
-            h_cx, h_cy = get_center_coord(data, "Head")
-            t_cx, t_cy = get_center_coord(data, "Tail")
+            head_cx, head_cy = get_center_coord(data, "Head")
+            tail_cx, tail_cy = get_center_coord(data, "Tail")
 
-            points = np.array([[h_cx, h_cy], [t_cx, t_cy]])
+            points = np.array([[head_cx, head_cy], [tail_cx, tail_cy]])
             labels = np.ones_like(points)
 
             image = cv2.imread(image_path)
@@ -135,11 +135,11 @@ class SegmentStep:
         rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: dict
 
         data = []
-        for row in tqdm(rows, desc="Segmentation"):
-            if not all(row.values()):
-                print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+        for data in tqdm(rows, desc="Segmentation"):
+            if not all(data.values()):
+                print(f"Skipping {data['name']} due to missing Head/Tail coordinates.")
 
-            name = row["name"]
+            name = data["name"]
             image_path = self.input_dir / name
             output_path = self.output_dir / name + ".npy"
 
@@ -147,7 +147,7 @@ class SegmentStep:
                 continue
 
             try:
-                mask = self._get_segment_mask(row, image_path, output_path)
+                mask = self._get_segment_mask(data, image_path, output_path)
                 features = self._extract_geometric_features(name, mask)
                 data.append(features)
 
