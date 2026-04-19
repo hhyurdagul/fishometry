@@ -9,13 +9,14 @@ from segment_anything import SamPredictor, sam_model_registry
 from tqdm import tqdm
 
 from src.config import Config
+from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_coord
 
 
 class SegmentModel:
     def __init__(self, model_path: Path | str):
+        self.model: SamPredictor
         self.model_initialized = False
         self.model_path = model_path
-        self.model: SamPredictor
 
     def _get_segmentation_model(self) -> SamPredictor:
         sam = sam_model_registry["vit_l"](checkpoint=self.model_path)
@@ -40,7 +41,40 @@ class SegmentModel:
         return masks[0]
 
 
-    def extract_geometric_features(self, name: str, mask: np.ndarray) -> dict:
+class SegmentStep:
+    def __init__(self, config: Config, rotated: bool = False):
+        self.input_dir = (
+            config.dataset.output_dir / "rotated"
+            if rotated
+            else config.dataset.input_dir
+        )
+        self.output_dir = config.dataset.output_dir / "segment"
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        self.segment_model = SegmentModel(config.models.sam)
+
+    def _get_segment_mask(
+        self, data: dict, image_path: Path, output_path: Path
+    ) -> np.ndarray:
+        if output_path.exists():
+            mask = np.load(output_path)
+        else:
+            h_cx, h_cy = get_center_coord(data, "Head")
+            t_cx, t_cy = get_center_coord(data, "Tail")
+
+            points = np.array([[h_cx, h_cy], [t_cx, t_cy]])
+            labels = np.ones_like(points)
+
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Could not read image: {image_path}")
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+            mask = self.segment_model.get_mask(image, points, labels)
+            np.save(output_path, mask)
+        return mask
+
+    def _extract_geometric_features(self, name: str, mask: np.ndarray) -> dict:
         # Mask is binary
         mask_uint8 = (mask > 0).astype(np.uint8) * 255
 
@@ -53,6 +87,7 @@ class SegmentModel:
         # Safety check in case SAM failed to generate a mask
         if not contours:
             return {
+                "name": name,
                 "area": 0,
                 "perimeter": 0,
                 "major_axis": 0,
@@ -96,32 +131,8 @@ class SegmentModel:
             "solidity": solidity,
         }
 
-
-class SegmentStep():
-    def __init__(self, config: Config, rotated: bool = False):
-        self.predictor_loaded = False
-        self.input_dir = (
-            config.dataset.output_dir / "rotated"
-            if rotated
-            else config.dataset.input_dir
-        )
-        self.output_dir = config.dataset.output_dir / "segment"
-        os.makedirs(self.output_dir, exist_ok=True)
-
-        self.segment_model = SegmentModel(config.models.sam)
-
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
-        rows = df.select(
-            "name",
-            "Head_x1",
-            "Head_x2",
-            "Head_y1",
-            "Head_y2",
-            "Tail_x1",
-            "Tail_x2",
-            "Tail_y1",
-            "Tail_y2",
-        ).rows(named=True)  # type: dict
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: dict
 
         data = []
         for row in tqdm(rows, desc="Segmentation"):
@@ -136,34 +147,15 @@ class SegmentStep():
                 continue
 
             try:
-                if output_path.exists():
-                    mask = np.load(output_path)
-                else:
-                    # Calculate centers
-                    h_cx = (row["Head_x1"] + row["Head_x2"]) / 2
-                    h_cy = (row["Head_y1"] + row["Head_y2"]) / 2
-                    t_cx = (row["Tail_x1"] + row["Tail_x2"]) / 2
-                    t_cy = (row["Tail_y1"] + row["Tail_y2"]) / 2
-
-                    points = np.array([[h_cx, h_cy], [t_cx, t_cy]])
-                    labels = np.ones_like(points)
-
-                    image = cv2.imread(image_path)
-                    if image is None:
-                        raise ValueError(f"Could not read image: {image_path}")
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-                    mask = self.segment_model.get_mask(image, points, labels)
-                    np.save(output_path, mask)
-
-                features = self.segment_model.extract_geometric_features(name, mask)
+                mask = self._get_segment_mask(row, image_path, output_path)
+                features = self._extract_geometric_features(name, mask)
                 data.append(features)
 
             except Exception as e:
                 print(f"Error segmenting {name}: {e}")
                 continue
 
-        return df.join(pl.DataFrame(data), on="name", how="left")
+        return df.join(pl.DataFrame(data), on="name", how="left") if data else df
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         return df.pipe(self._process_images)
