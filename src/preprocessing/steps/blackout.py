@@ -1,44 +1,42 @@
-from src.config import Config
-import os
 import cv2
 import numpy as np
 import polars as pl
 from tqdm import tqdm
-from .base import PipelineStep
+
+from src.config import Config
 
 
-class BlackoutStep(PipelineStep):
-    def __init__(self, config: Config, rotated: bool=False, canvas_size=(224, 224)):
-        super().__init__(config)
+class BlackoutStep:
+    def __init__(self, config: Config, rotated: bool = False, canvas_size=(224, 224)):
+        self.config = config
         self.canvas_size = canvas_size
-    
-        self.image_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
+
+        self.image_dir = (
+            config.dataset.output_dir / "rotated"
+            if rotated
+            else config.dataset.input_dir
+        )
         self.mask_dir = config.dataset.output_dir / "segment"
         self.output_dir = config.dataset.output_dir / "blackout"
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        names = df["name"].to_list()
+        return df.pipe(self._process_images)
+
+    def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
+        names = df["name"].drop_nulls().to_list()
 
         for name in tqdm(names, desc="Blackout & Center"):
-            # Paths
-            img_path = os.path.join(self.image_dir, name)
+            image_path = self.image_dir / name
+            mask_path = self.mask_dir / name + ".npy"
+            output_path = self.output_dir / name
 
-            # Standardize naming: append .npy
-            mask_name = name + ".npy"
-            mask_path = os.path.join(self.mask_dir, mask_name)
-
-            output_path = os.path.join(self.output_dir, name)
-
-            if os.path.exists(output_path):
-                continue
-
-            if not os.path.exists(img_path) or not os.path.exists(mask_path):
+            if not image_path.exist() or not mask_path.exist() or output_path.exists():
                 continue
 
             try:
                 # Load
-                img = cv2.imread(img_path)
+                img = cv2.imread(image_path)
                 mask = np.load(mask_path)
 
                 if img is None:
@@ -95,11 +93,9 @@ class BlackoutStep(PipelineStep):
                 canvas[y_off : y_off + new_h, x_off : x_off + new_w] = resized_fish
 
                 # Save
-                cv2.imwrite(os.path.join(self.output_dir, name), canvas)
+                cv2.imwrite(output_path, canvas)
 
             except Exception as e:
                 print(f"Error processing {name}: {e}")
 
-        # We don't necessarily update DF unless we want to link new path?
-        # But for regression we just need the image file to exist.
         return df

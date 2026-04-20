@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -20,7 +19,21 @@ from depth_anything_v2.dpt import DepthAnythingV2  # type: ignore
 
 
 class DepthModel:
-    def __init__(self, model_path: Path | str):
+    def __init__(self, model_path: Path, download: bool = True):
+        if not model_path.exists():
+            if not download:
+                raise FileNotFoundError(
+                    f"DepthAnythingV2 model not found at path: {model_path}"
+                )
+            print(
+                f"Warning: DepthAnythingV2 weights not found at {self.model_path}, downloading..."
+            )
+
+            torch.hub.download_url_to_file(
+                "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
+                str(model_path),
+            )
+
         self.model: DepthAnythingV2
         self.model_initialized = False
         self.model_path = model_path
@@ -34,18 +47,7 @@ class DepthModel:
             }
         )
 
-        if os.path.exists(self.model_path):
-            model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
-        else:
-            print(f"Warning: DepthAnythingV2 weights not found at {self.model_path}")
-
-            torch.hub.download_url_to_file(
-                "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth",
-                str(self.model_path),
-            )
-            if os.path.exists(self.model_path):
-                model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
-
+        model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
         model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         model.eval()
         return model
@@ -68,19 +70,21 @@ class DepthModel:
         return depth
 
 
-
 class DepthStep:
     def __init__(self, config: Config, rotated: bool = False):
+        self.config = config
         self.input_dir = (
             config.dataset.output_dir / "rotated"
             if rotated
             else config.dataset.input_dir
         )
         self.output_dir = config.dataset.output_dir / "depth"
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.depth_model = DepthModel(config.models.depth)
+        self.depth_model = DepthModel(config.model_path.depth)
 
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        return df.pipe(self._process_images).drop_nulls()
 
     def _get_depth_map(self, image_path: Path, output_path: Path) -> np.ndarray:
         if output_path.exists():
@@ -94,7 +98,6 @@ class DepthStep:
             np.save(output_path, depth)
         return depth
 
-        
     def _get_robust_depth(
         self, depth_map: np.ndarray, x: int, y: int, patch_size: int = 5
     ) -> float:
@@ -139,11 +142,11 @@ class DepthStep:
         rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: ignore
 
         data = []
-        for data in tqdm(rows, desc="Depth Estimation"):
-            if not all(data.values()):
-                print(f"Skipping {data['name']} due to missing Head/Tail coordinates.")
+        for row in tqdm(rows, desc="Depth Estimation"):
+            if not all(row.values()):
+                print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
 
-            name = data["name"]
+            name = row["name"]
             image_path = self.input_dir / name
             output_path = self.output_dir / (name + ".npy")
 
@@ -152,7 +155,7 @@ class DepthStep:
 
             try:
                 depth = self._get_depth_map(image_path, output_path)
-                features = self._extract_metrics(data, depth)
+                features = self._extract_metrics(row, depth)
                 data.append(features)
 
             except Exception as e:
@@ -160,6 +163,3 @@ class DepthStep:
                 continue
 
         return df.join(pl.DataFrame(data), on="name", how="left") if data else df
-
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images)

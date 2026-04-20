@@ -13,7 +13,6 @@ Usage:
     python -m src.preprocessing.run --dataset-name data-inside
 """
 
-import os
 import polars as pl
 import typer
 from src.config import get_config, Config
@@ -31,7 +30,9 @@ def run_pipeline(config: Config):
     print(f"Starting preprocessing pipeline for {config.dataset.name}...")
 
     if not config.dataset.split_csv_path.exists():
-        raise FileNotFoundError(f"Run create data module first. {config.dataset.split_csv_path} not found.")
+        raise FileNotFoundError(
+            f"Run create data module first. {config.dataset.split_csv_path} not found."
+        )
 
     config.dataset.output_dir.mkdir(exist_ok=True)
     rotated = config.dataset.rotate
@@ -58,6 +59,7 @@ def run_pipeline(config: Config):
     print(f"Preprocessing pipeline for {config.dataset.name} finished.")
     print(f"Saved processed data to {config.dataset.output_csv_path}")
 
+
 @app.command()
 def main(
     dataset_name: str = typer.Option(..., help="Path to config file"),
@@ -67,6 +69,5 @@ def main(
     run_pipeline(config)
 
 
-import polars as pl
 if __name__ == "__main__":
     app()

@@ -1,144 +1,115 @@
-import os
-import torch
 import json
+from pathlib import Path
+
 import polars as pl
+import torch
 from tqdm import tqdm
 from ultralytics import YOLO
+from ultralytics.engine.results import Boxes
 
-from src.preprocessing.steps.base import PipelineStep
-from src.utils.io import load_image, get_raw_name
 from src.config import Config
 
 
-class YoloStep(PipelineStep):
-    def __init__(self, config: Config, rotated: bool=False):
-        super().__init__(config)
-        self.rotated = rotated
-        self.model_path = config.models.yolo
+class YoloModel:
+    def __init__(self, model_path: Path):
+        if not model_path.exists():
+            raise FileNotFoundError(f"Yolo model not found at path: {model_path}")
 
-        self.input_dir = config.dataset.output_dir / "rotated" if rotated else config.dataset.input_dir
-        self.output_dir = config.dataset.output_dir / "cache" / f"yolo_{'rotated' if self.rotated else 'initial'}"
-        self.output_dir.mkdir(exist_ok=True, parents=True)
-        
+        self.model: YOLO
+        self.model_initialized = False
+        self.model_path = model_path
 
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        model = YOLO(self.model_path)
+    def _get_yolo_model(self) -> YOLO:
+        return YOLO(self.model_path)
 
-        coord_data = []
-        names = df["name"].to_list()
+    def predict(
+        self, image_path: Path
+    ) -> tuple[Boxes, int, int] | tuple[None, None, None]:
+        if not self.model_initialized:
+            self.model = self._get_yolo_model()
+            self.model_initialized = True
 
-        for name in tqdm(names, desc=f"YOLO {'rotated' if self.rotated else 'initial'}"):
-            image_path = os.path.join(self.input_dir, name)
-            if not os.path.exists(image_path):
-                continue
-
-            cache_path = self.output_dir / f"{name}.json"
-
-            # Check cache
-            if os.path.exists(cache_path):
-                try:
-                    with open(cache_path, "r") as f:
-                        prediction = json.load(f)
-                    if prediction:  # non-empty cache
-                        coord_data.append({"name": name, **prediction})
-                    continue  # Skip inference
-                except Exception:
-                    pass  # corrupted cache, re-run
-
-            prediction = self.get_prediction(model, image_path)
-
-            # Cache result (save even if None/Empty to avoid re-running?)
-            # If prediction is None, we can save "null" or empty dict?
-            # Current logic: coord_data only appends if prediction exists.
-            # So if we save empty, next time we load empty and don't append. Correct.
-
-            with open(cache_path, "w") as f:
-                json.dump(prediction, f)
-
-            if prediction:
-                coord_data.append({"name": name, **prediction})
-
-        if not coord_data:
-            print(f"Warning: No VALID detections found in YoloStep {'rotated' if self.rotated else 'initial'}.")
-            # If we return df as is, subsequent steps might fail if they expect coords.
-            # But better than crashing here.
-            # Ideally filter df to empty? Or just return.
-            return df
-
-        new_df = pl.DataFrame(coord_data)
-
-        # Drop existing coord columns if any to avoid collision
-        exclude_cols = new_df.filter(pl.col("name").is_in(new_df["name"])).columns
-        exclude_cols = [c for c in exclude_cols if c != "name"]
-
-        # We only want to join rows that exist in new_df (successful detections)
-        # The inner join does that.
-
-        # To avoid "duplicate column" error if columns exist in df:
-        cols_to_drop = [c for c in new_df.columns if c != "name" and c in df.columns]
-        if cols_to_drop:
-            df = df.drop(cols_to_drop)
-
-        df = df.join(new_df, on="name", how="inner")
-
-        return df
-
-    def only_one_head_tail_and_fish_exist(self, cls: torch.Tensor) -> bool:
-        # For data-inside, we might have class 2 (Eye).
-        # We want 1 Head (0), 1 Tail (1), and 1 Fish.
-        # If class 2 is Eye, we should ignore it when counting "Fish".
-
-        has_head = (cls == 0).sum() == 1
-        has_tail = (cls == 1).sum() == 1
-
-        if not (has_head and has_tail):
-            return False
-
-        # Check for Fish
-        # Filter out Head(0), Tail(1)
-        others = cls[(cls != 0) & (cls != 1)]
-
-        if "inside_fish_model" in self.model_path:
-            # Ignore class 2 (Eye)
-            others = others[others != 2]
-
-        return others.nelement() == 1
-
-    def get_prediction(self, model: YOLO, image_path: str) -> dict | None:
-        results = model.predict(image_path, conf=0.8, verbose=False)
-        if not results:
-            return None
+        results = self.model.predict(image_path, conf=0.8, verbose=False)
+        if not results or len(results[0].boxes) == 0:
+            return None, None, None
 
         prediction = results[0]
-        cls = prediction.boxes.cls
+        if len(torch.unique(prediction.boxes.cls)) != len(prediction.boxes.cls):
+            return None, None, None
 
-        if not self.only_one_head_tail_and_fish_exist(cls):
-            return None
+        image_height, image_width = prediction.orig_shape
 
-        if "inside_fish_model" in self.model_path:
-            name_map = {0: "Head", 1: "Tail", 2: "Eye"}
-        else:
-            name_map = {0: "Head", 1: "Tail"}
+        return prediction.boxes, image_height, image_width
 
-        # Get original image dimensions
-        img_h, img_w = prediction.orig_shape
 
-        data = {"img_w": img_w, "img_h": img_h}
+class YoloStep:
+    def __init__(self, config: Config, rotated: bool = False):
+        self.config = config
+        self.rotated = rotated
 
-        for box in prediction.boxes:
-            c = box.cls.item()
-            label = name_map.get(c, "Fish")
-            data.update(self.get_xxyywh(label, box))
-        return data
+        self.input_dir = (
+            config.dataset.output_dir / "rotated"
+            if rotated
+            else config.dataset.input_dir
+        )
+        self.output_dir = (
+            config.dataset.output_dir
+            / "cache"
+            / f"yolo_{'rotated' if self.rotated else 'initial'}"
+        )
+        self.output_dir.mkdir(exist_ok=True, parents=True)
 
-    def get_xxyywh(self, type: str, box):
+        self.yolo_model = YoloModel(config.model_path.yolo)
+
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        return df.pipe(self._process_images).drop_nulls()
+
+    def _get_xxyywh(self, label: str, box: Boxes):
         x1, y1, x2, y2 = box.xyxy[0].int().tolist()
         _, _, w, h = box.xywh[0].int().tolist()
         return {
-            f"{type}_x1": x1,
-            f"{type}_x2": x2,
-            f"{type}_y1": y1,
-            f"{type}_y2": y2,
-            f"{type}_w": w,
-            f"{type}_h": h,
+            f"{label}_x1": x1,
+            f"{label}_x2": x2,
+            f"{label}_y1": y1,
+            f"{label}_y2": y2,
+            f"{label}_w": w,
+            f"{label}_h": h,
         }
+
+    def _get_yolo_data(self, name: str, image_path: Path, output_path: Path) -> dict:
+        if output_path.exists():
+            with open(output_path, "r") as f:
+                return json.load(f)
+
+        boxes, image_w, image_h = self.yolo_model.predict(image_path)
+        if boxes is None:
+            return {}
+
+        classes = self.config.params.yolo_classes
+        default_item = classes[-1]
+        name_map = dict(zip(range(len(classes[:-1])), classes[:-1]))
+
+        data = {"name": name, "Image_w": image_w, "Image_h": image_h}
+        for box in boxes:
+            label = name_map.get(box.cls.item(), default_item)
+            data.update(self._get_xxyywh(label, box))
+
+        with open(output_path, "w") as f:
+            json.dump(data, f)
+
+        return data
+
+    def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
+        names = df["name"].drop_nulls().to_list()
+
+        data = []
+        for name in tqdm(names, desc="YOLO Object Detection"):
+            image_path = self.input_dir / name
+            output_path = self.output_dir / name + ".json"
+            if not image_path.exists():
+                continue
+
+            features = self._get_yolo_data(name, image_path, output_path)
+            data.append(features)
+
+        return df.join(pl.DataFrame(data), on="name", how="left") if data else df

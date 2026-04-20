@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import cv2
@@ -13,7 +12,11 @@ from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_c
 
 
 class SegmentModel:
-    def __init__(self, model_path: Path | str):
+    def __init__(self, model_path: Path):
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"SegmentAnything model not found at path: {model_path}"
+            )
         self.model: SamPredictor
         self.model_initialized = False
         self.model_path = model_path
@@ -43,15 +46,19 @@ class SegmentModel:
 
 class SegmentStep:
     def __init__(self, config: Config, rotated: bool = False):
+        self.config = config
         self.input_dir = (
             config.dataset.output_dir / "rotated"
             if rotated
             else config.dataset.input_dir
         )
         self.output_dir = config.dataset.output_dir / "segment"
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.segment_model = SegmentModel(config.models.sam)
+        self.segment_model = SegmentModel(config.model_path.sam)
+
+    def process(self, df: pl.DataFrame) -> pl.DataFrame:
+        return df.pipe(self._process_images).drop_nulls()
 
     def _get_segment_mask(
         self, data: dict, image_path: Path, output_path: Path
@@ -86,14 +93,7 @@ class SegmentStep:
 
         # Safety check in case SAM failed to generate a mask
         if not contours:
-            return {
-                "name": name,
-                "area": 0,
-                "perimeter": 0,
-                "major_axis": 0,
-                "minor_axis": 0,
-                "solidity": 0,
-            }
+            return {}
 
         # Grab the largest contour (to ignore any small noise artifacts SAM might have picked up)
         fish_contour = max(contours, key=cv2.contourArea)  # type: ignore
@@ -135,11 +135,11 @@ class SegmentStep:
         rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: dict
 
         data = []
-        for data in tqdm(rows, desc="Segmentation"):
-            if not all(data.values()):
-                print(f"Skipping {data['name']} due to missing Head/Tail coordinates.")
+        for row in tqdm(rows, desc="Segmentation"):
+            if not all(row.values()):
+                print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
 
-            name = data["name"]
+            name = row["name"]
             image_path = self.input_dir / name
             output_path = self.output_dir / name + ".npy"
 
@@ -147,7 +147,7 @@ class SegmentStep:
                 continue
 
             try:
-                mask = self._get_segment_mask(data, image_path, output_path)
+                mask = self._get_segment_mask(row, image_path, output_path)
                 features = self._extract_geometric_features(name, mask)
                 data.append(features)
 
@@ -156,6 +156,3 @@ class SegmentStep:
                 continue
 
         return df.join(pl.DataFrame(data), on="name", how="left") if data else df
-
-    def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images)

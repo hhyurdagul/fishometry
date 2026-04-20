@@ -1,64 +1,48 @@
-from src.config import Config
+import math
+from pathlib import Path
+
 import cv2
 import numpy as np
 import polars as pl
-import os
-import math
 from tqdm import tqdm
-from .base import PipelineStep
-from src.utils.io import load_image, save_image
+
+from src.config import Config
+from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES 
 
 
-class RotateStep(PipelineStep):
+class RotateStep():
     def __init__(self, config: Config):
-        super().__init__(config)
+        self.config = config
         self.input_dir = config.dataset.input_dir
         self.output_dir = config.dataset.output_dir / "rotated"
-        os.makedirs(self.output_dir, exist_ok=True)
-
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        names = df["name"].to_list()
+        return df.pipe(self._process_images).drop_nulls()
 
-        for name in tqdm(names, desc="Rotating Images"):
+    def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: list[dict]
+
+        for row in tqdm(rows, desc="Segmentation"):
+            if not all(row.values()):
+                print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+
+            name = row["name"]
             image_path = self.input_dir / name
             output_path = self.output_dir / name
 
-            if os.path.exists(output_path):
-                continue
-
-            if not os.path.exists(image_path):
-                continue
-
-            # Get coordinates for this image
-            row = df.filter(pl.col("name") == name)
-            if row.height == 0:
-                continue
-
-            image_attr = row.to_dicts()[0]
-
-            required_keys = [
-                "Head_x1",
-                "Head_x2",
-                "Head_y1",
-                "Head_y2",
-                "Tail_x1",
-                "Tail_x2",
-                "Tail_y1",
-                "Tail_y2",
-            ]
-            if any(k not in image_attr or image_attr[k] is None for k in required_keys):
+            if not image_path.exists() or output_path.exists():
                 continue
 
             try:
-                rotated_image, _ = self.rotate_and_crop(image_path, image_attr)
-                save_image(rotated_image, os.path.join(self.output_dir, name))
+                rotated_image, _ = self._rotate_and_crop(image_path, row)
+                cv2.imwrite(output_path, rotated_image)
             except Exception as e:
                 print(f"Error rotating {name}: {e}")
-                pass
 
         return df
 
-    def rotate_and_crop(self, image_path: str, attr: dict) -> tuple[np.ndarray, dict]:
+    def _rotate_and_crop(self, image_path: Path, data: dict) -> tuple[np.ndarray, dict]:
         image = cv2.imread(image_path)
         h, w = image.shape[:2] # type: ignore
 
@@ -66,10 +50,10 @@ class RotateStep(PipelineStep):
         # We want Tail on Left, Head on Right.
         # Vector T->H should point +X (0 degrees).
 
-        hx = (attr["Head_x1"] + attr["Head_x2"]) / 2
-        hy = (attr["Head_y1"] + attr["Head_y2"]) / 2
-        tx = (attr["Tail_x1"] + attr["Tail_x2"]) / 2
-        ty = (attr["Tail_y1"] + attr["Tail_y2"]) / 2
+        hx = (data["Head_x1"] + data["Head_x2"]) / 2
+        hy = (data["Head_y1"] + data["Head_y2"]) / 2
+        tx = (data["Tail_x1"] + data["Tail_x2"]) / 2
+        ty = (data["Tail_y1"] + data["Tail_y2"]) / 2
 
         dx = hx - tx  # Vector from Tail to Head
         dy = hy - ty
@@ -113,7 +97,7 @@ class RotateStep(PipelineStep):
         # We use a heuristic or geometric solution.
         # Geometric solution for largest axis-aligned rectangle inside a rotated rectangle.
 
-        crop_x, crop_y, crop_w, crop_h = self.largest_rotated_rect(
+        crop_x, crop_y, crop_w, crop_h = self._largest_rotated_rect(
             w, h, math.radians(rotation_angle)
         )
 
@@ -140,10 +124,10 @@ class RotateStep(PipelineStep):
 
         return (
             cropped_image,
-            attr,
+            data,
         )  # Return original attr (or empty dict since we don't use it)
 
-    def largest_rotated_rect(self, w, h, angle):
+    def _largest_rotated_rect(self, w, h, angle):
         """
         Given a rectangle of size wxh that has been rotated by 'angle',
         computes the width and height of the largest possible
