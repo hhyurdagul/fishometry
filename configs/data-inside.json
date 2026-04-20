@@ -6,7 +6,7 @@
     "feature_sets": ["eye", "coords"],
     "depth": [true, false]
   },
-  "models": {
+  "model_path": {
     "yolo": "checkpoints/yolo11m-inside_fish_model.pt",
     "sam": "checkpoints/sam.pth",
     "depth": "checkpoints/depth_anything_v2_vitl.pth"
@@ -14,6 +14,7 @@
   "params": {
     "train_ratio": 0.7,
     "val_ratio": 0.15,
-    "test_ratio": 0.15
+    "test_ratio": 0.15,
+    "yolo_classes": ["Head", "Tail", "Eye", "Fish"]
   }
 }

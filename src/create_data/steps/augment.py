@@ -73,7 +73,7 @@ class AugmentStep(PipelineStep):
 
         new_config = Config(
             dataset=dataset_config,
-            models=self.config.models,
+            model_path=self.config.model_path,
             params=self.config.params,
         )
 

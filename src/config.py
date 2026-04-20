@@ -13,21 +13,22 @@ CONFIG_ROOT = Path("configs")
 
 
 class ModelConfig(BaseModel):
-    yolo: str
-    sam: str
-    depth: str
+    yolo: Path
+    sam: Path
+    depth: Path
 
 
 class ParamConfig(BaseModel):
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     test_ratio: float = 0.15
+    yolo_classes: list[str] = ["Head", "Tail", "Fish"] # Last one accepted as default
 
     @field_validator("train_ratio", "val_ratio", "test_ratio")
     @classmethod
     def check_range(cls, v):
         if not 0.0 < v < 1.0:
-            raise ValueError(f"Value must be between 0.0 and 1.0")
+            raise ValueError("Value must be between 0.0 and 1.0")
         return v
 
     @model_validator(mode="after")
@@ -44,7 +45,7 @@ class DatasetConfig(BaseModel):
     feature_sets: list[str] = ["coords", "scaled"]
     depth: list[bool] = [True, False]
 
-    @computed_field()
+    @computed_field
     @property
     def dataset_dir(self) -> Path:
         return DATA_ROOT / self.name
@@ -79,16 +80,16 @@ class DatasetConfig(BaseModel):
         if not (DATA_ROOT / self.name).exists():
             raise ValueError(f"Dataset `{self.name}` does not exist")
         if not self.input_dir.exists():
-            raise ValueError(f"Directory `raw` does not exist")
+            raise ValueError("Directory `raw` does not exist")
         if not self.input_csv_path.exists():
-            raise ValueError(f"File `raw.csv` does not exist")
+            raise ValueError("File `raw.csv` does not exist")
         return self
 
 
 class Config(BaseModel):
-    models: ModelConfig
-    params: ParamConfig
     dataset: DatasetConfig
+    model_path: ModelConfig
+    params: ParamConfig
 
     def __repr__(self):
         return f"Config(dataset={self.dataset.name})"
