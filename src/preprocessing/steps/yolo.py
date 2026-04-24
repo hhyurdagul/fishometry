@@ -105,7 +105,7 @@ class YoloStep:
         data = []
         for name in tqdm(names, desc="YOLO Object Detection"):
             image_path = self.input_dir / name
-            output_path = self.output_dir / name + ".json"
+            output_path = self.output_dir / (name + ".json")
             if not image_path.exists():
                 continue
 

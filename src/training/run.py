@@ -7,22 +7,22 @@ Usage:
     python -m src.training.run --pipeline 1 --dataset data-inside
     python -m src.training.run  # Runs default tasks
 """
-from src.training.models import (
-    train_baseline,
-    train_linear_model,
-    train_mlp_model,
-    train_xgboost_model,
-    train_cnn_model,
-)
-from src.config import get_config, Config
+from typing import Callable
 
-from itertools import product
 import polars as pl
 import typer
 
+from src.config import Config, get_config
+from src.training.models import (
+    train_baseline,
+    train_cnn_model,
+    train_linear_model,
+    train_mlp_model,
+    train_xgboost_model,
+)
+
 app = typer.Typer(add_completion=False, help="Training orchestrator.")
 
-from typing import Callable
 
 pipeline_function = Callable[[pl.DataFrame, Config, str, bool, bool], pl.DataFrame]
 
@@ -64,10 +64,10 @@ def main(
 
 
     tasks = [
-        # train_linear_model,
+        train_linear_model,
         train_xgboost_model,
-        # train_mlp_model,
-        # train_cnn_model,
+        train_mlp_model,
+        train_cnn_model,
     ]
 
     feature_sets = config.dataset.feature_sets

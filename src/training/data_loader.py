@@ -5,8 +5,6 @@ This module provides the load_data function used by all training scripts.
 """
 
 import polars as pl
-import numpy as np
-from typing import List, Tuple, Optional
 
 
 def get_feature_names_and_desc(
@@ -35,27 +33,77 @@ def get_feature_names_and_desc(
     # Base Features
     if feature_set == "coords":
         features.append(
-            pl.col([
-                "img_w","img_h", "Fish_w", "Fish_h",
-                "Fish_x1", "Fish_x2", "Fish_y1", "Fish_y2"
-            ])
+            pl.col(
+                [
+                    "Image_w",
+                    "Image_h",
+                    "Fish_w",
+                    "Fish_h",
+                    "Fish_x1",
+                    "Fish_x2",
+                    "Fish_y1",
+                    "Fish_y2",
+                ]
+            )
         )
-
-    elif feature_set == "features":
-        features.append(pl.col([
-            "mask_area", "mask_perimeter", "major_axis", "minor_axis", "solidity"
-        ]))
 
     elif feature_set == "eye":
         features.append(pl.col(["Eye_w", "Eye_h", "Fish_w", "Fish_h"]))
 
+    elif feature_set == "features":
+        features.append(
+            pl.col(
+                [
+                    "Image_w",
+                    "Image_h",
+                    "Fish_w",
+                    "Fish_h",
+                    "Fish_x1",
+                    "Fish_x2",
+                    "Fish_y1",
+                    "Fish_y2",
+                ]
+            )
+        )
+        features.append(
+            pl.col(
+                [
+                    "mask_area",
+                    "mask_perimeter",
+                    "major_axis",
+                    "minor_axis",
+                    "solidity",
+                    "background_depth",
+                    "has_other_objects",
+                    "is_in_fishnet",
+                ]
+            )
+        )
+
+        features.extend(
+            [
+                pl.selectors.starts_with("fish_placement_"),
+                pl.selectors.starts_with("fish_orientation_"),
+                pl.selectors.starts_with("lightning_condition_"),
+            ]
+        )
+
     # Depth Features
     if depth:
-        features.append(pl.col(["head_center_depth", "fish_center_depth", "tail_center_depth"]))
+        features.append(
+            pl.col(
+                [
+                    "head_depth",
+                    "body_depth",
+                    "tail_depth",
+                    "depth_gradient_raw",
+                    "depth_gradient_abs",
+                ]
+            )
+        )
         feature_desc = f"{feature_desc}_depth"
 
     if per_type:
         feature_desc = f"{feature_desc}_per_type"
 
     return features, feature_desc
-

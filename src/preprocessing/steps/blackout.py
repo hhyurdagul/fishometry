@@ -28,10 +28,10 @@ class BlackoutStep:
 
         for name in tqdm(names, desc="Blackout & Center"):
             image_path = self.image_dir / name
-            mask_path = self.mask_dir / name + ".npy"
+            mask_path = self.mask_dir / (name + ".npy")
             output_path = self.output_dir / name
 
-            if not image_path.exist() or not mask_path.exist() or output_path.exists():
+            if not image_path.exists() or not mask_path.exists() or output_path.exists():
                 continue
 
             try:

@@ -70,7 +70,7 @@ class SegmentStep:
             tail_cx, tail_cy = get_center_coord(data, "Tail")
 
             points = np.array([[head_cx, head_cy], [tail_cx, tail_cy]])
-            labels = np.ones_like(points)
+            labels = np.ones(len(points))
 
             image = cv2.imread(image_path)
             if image is None:
@@ -141,7 +141,7 @@ class SegmentStep:
 
             name = row["name"]
             image_path = self.input_dir / name
-            output_path = self.output_dir / name + ".npy"
+            output_path = self.output_dir / (name + ".npy")
 
             if not image_path.exists():
                 continue

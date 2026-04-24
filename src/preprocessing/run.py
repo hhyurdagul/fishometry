@@ -12,6 +12,7 @@ Runs the image preprocessing pipeline including:
 Usage:
     python -m src.preprocessing.run --dataset-name data-inside
 """
+from src.preprocessing.steps.vlm import VLMStep
 
 import polars as pl
 import typer
@@ -46,6 +47,7 @@ def run_pipeline(config: Config):
         DepthStep(config, rotated=rotated),
         SegmentStep(config, rotated=rotated),
         BlackoutStep(config, rotated=rotated),
+        VLMStep(config, rotated=rotated),
         FeatureStep(config, rotated=rotated),
     ]
 

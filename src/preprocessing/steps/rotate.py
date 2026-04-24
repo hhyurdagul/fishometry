@@ -11,14 +11,17 @@ from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES
 
 
 class RotateStep():
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, rotated: bool = False):
         self.config = config
+        self.rotated = rotated
         self.input_dir = config.dataset.input_dir
         self.output_dir = config.dataset.output_dir / "rotated"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images).drop_nulls()
+        if self.rotated:
+            return df.pipe(self._process_images).drop_nulls()
+        return df
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
         rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: list[dict]

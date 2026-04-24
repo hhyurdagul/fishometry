@@ -40,11 +40,9 @@ class DepthModel:
 
     def _get_depth_model(self) -> DepthAnythingV2:
         model = DepthAnythingV2(
-            {
-                "encoder": "vitl",
-                "features": 256,
-                "out_channels": [256, 512, 1024, 1024],
-            }
+            encoder="vitl",
+            features=256,
+            out_channels=[256, 512, 1024, 1024],
         )
 
         model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
@@ -53,10 +51,10 @@ class DepthModel:
         return model
 
     def get_depth_map(self, image: np.ndarray) -> np.ndarray:
-        if not self.model_loaded:
+        if not self.model_initialized:
             # To kill the overhead of loading the model if all the images are cached
             self.model = self._get_depth_model()
-            self.model_loaded = True
+            self.model_initialized = True
 
         if self.model is None:
             raise ValueError("Could not load DepthAnythingV2 model")
@@ -96,6 +94,7 @@ class DepthStep:
 
             depth = self.depth_model.get_depth_map(image)
             np.save(output_path, depth)
+
         return depth
 
     def _get_robust_depth(
@@ -121,7 +120,7 @@ class DepthStep:
 
     def _extract_metrics(self, data: dict, depth: np.ndarray) -> dict:
         head_cx, head_cy = get_center_coord(data, "Head")
-        body_cx, body_cy = get_center_coord(data, "Body")
+        body_cx, body_cy = get_center_coord(data, "Fish")
         tail_cx, tail_cy = get_center_coord(data, "Tail")
 
         head_depth = self._get_robust_depth(depth, head_cx, head_cy, 9)

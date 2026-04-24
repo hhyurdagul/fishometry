@@ -1,5 +1,6 @@
-from pathlib import Path
 import json
+import time
+from pathlib import Path
 
 import polars as pl
 from google import genai
@@ -8,6 +9,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from src.config import Config
+from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES
 
 
 class VLM:
@@ -72,34 +74,19 @@ class VLM:
         self.client = genai.Client(api_key=api_key)
 
     def extract_fish_dataset_metadata(self, image: Image.Image) -> dict:
-        try:
-            response = self.client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
-                contents=[
-                    "Analyze the image. Determine the fish's orientation and placement. "
-                    "The fish is always fully visible. Be precise about the placement category.",
-                    image,
-                ],
-                config = self.model_config
-            )
 
-            pred = json.loads(response.text) # type: json
-            pred["missing_genai"] = False
+        time.sleep(5)
+        response = self.client.models.generate_content(
+            model="gemma-4-31b-it",
+            contents=[
+                "Analyze the image. Determine the fish's orientation and placement. "
+                "The fish is always fully visible. Be precise about the placement category.",
+                image,
+            ],
+            config = self.model_config
+        )
 
-        except Exception:
-            pred = {
-                "background_depth": "none",
-                "has_other_objects": False,
-                "is_in_fishnet": False,
-                "fish_placement": "none",
-                "fish_orientation": "none",
-                "lighting_condition": "none",
-                "estimated_species": "unknown",
-                "missing_genai": True,
-            }
-
-        return pred
-
+        return json.loads(response.text) # type: ignore
 
 class VLMStep:
     def __init__(self, config: Config, rotated: bool = False):
@@ -109,7 +96,7 @@ class VLMStep:
             if rotated
             else config.dataset.input_dir
         )
-        self.output_dir = config.dataset.output_dir / "cache" / "genai"
+        self.output_dir = config.dataset.output_dir / "cache" / "vlm"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.vlm = VLM()
@@ -117,33 +104,39 @@ class VLMStep:
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         return df.pipe(self._process_images).drop_nulls()
 
-    def _get_features(self, name: str, image_path: Path, output_path: Path) -> dict:
+    def _get_features(self, name: str, image_path: Path, output_path: Path) -> dict | None:
         if output_path.exists():
             with open(output_path, "r") as f:
                 return json.load(f)
 
         image = Image.open(image_path)
         features = self.vlm.extract_fish_dataset_metadata(image)
-        features["name"] = name
 
+        features["name"] = name
         with open(output_path, "w") as f:
             json.dump(features, f)
 
         return features
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
-        rows = df["name"].to_list()
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: ignore
 
         data = []
-        for name in tqdm(rows, desc="Vision Language Model"):
+        for row in tqdm(rows, desc="Vision Language Model"):
+            if not all(row.values()):
+                print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+
+            name = row["name"]
             image_path = self.input_dir / name
-            output_path = self.output_dir / name + ".json"
+            output_path = self.output_dir / (name + ".json")
 
             if not image_path.exists():
                 continue
 
             try:
                 features = self._get_features(name, image_path, output_path)
+                if features is None:
+                    continue
                 data.append(features)
 
             except Exception as e:
