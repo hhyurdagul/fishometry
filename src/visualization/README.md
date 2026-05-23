@@ -5,7 +5,7 @@ This package contains the Streamlit app used to inspect datasets, preprocessing 
 ## Entrypoint
 
 ```bash
-uv run streamlit run src/visualization/app.py
+uv run -m streamlit run src/visualization/app.py
 ```
 
 Run the command from the repository root so relative paths under `data/` resolve correctly.

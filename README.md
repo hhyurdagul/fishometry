@@ -50,7 +50,7 @@ uv run python -m src.training.run --dataset-name data-inside
 uv run python -m src.training.run --dataset-name data-inside-zoom
 uv run python -m src.training.run --dataset-name data-outside
 
-uv run streamlit run src/visualization/app.py
+uv run -m streamlit run src/visualization/app.py
 ```
 
 ## Important Generated Files
