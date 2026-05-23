@@ -7,7 +7,6 @@ The project compares fish photographed under controlled laboratory conditions wi
 ## Documentation Map
 
 - [configs](configs/README.md): dataset configuration files and the meaning of each config field
-- [scripts](scripts/README.md): helper shell scripts
 - [src](src/README.md): overview of the Python source package
 - [create_data](src/create_data/README.md): split creation and zoom augmentation pipeline
 - [create_data steps](src/create_data/steps/README.md): individual split and augmentation components
@@ -17,8 +16,6 @@ The project compares fish photographed under controlled laboratory conditions wi
 - [training models](src/training/models/README.md): model implementations
 - [visualization](src/visualization/README.md): Streamlit analysis app
 - [visualization views](src/visualization/views/README.md): app pages and result views
-- [tests](tests/README.md): test directory notes
-- [Follow.md](Follow.md): thesis notes and narrative background
 
 ## Dataset Flow
 
