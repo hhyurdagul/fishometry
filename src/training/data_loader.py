@@ -30,20 +30,13 @@ def get_feature_names_and_desc(
 
     features = [pl.selectors.starts_with("fish_type_")]
     feature_desc = f"{model_name}_{feature_set}"
+    coords = ["relative_w", "relative_h", "relative_area", "fish_aspect", "fish_area"]
+
     # Base Features
     if feature_set == "coords":
         features.append(
             pl.col(
-                [
-                    "Image_w",
-                    "Image_h",
-                    "Fish_w",
-                    "Fish_h",
-                    "Fish_x1",
-                    "Fish_x2",
-                    "Fish_y1",
-                    "Fish_y2",
-                ]
+                coords
             )
         )
 
@@ -53,16 +46,7 @@ def get_feature_names_and_desc(
     elif feature_set == "features":
         features.append(
             pl.col(
-                [
-                    "Image_w",
-                    "Image_h",
-                    "Fish_w",
-                    "Fish_h",
-                    "Fish_x1",
-                    "Fish_x2",
-                    "Fish_y1",
-                    "Fish_y2",
-                ]
+                coords
             )
         )
         features.append(

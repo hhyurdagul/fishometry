@@ -77,7 +77,7 @@ class VLM:
 
         time.sleep(5)
         response = self.client.models.generate_content(
-            model="gemma-4-31b-it",
+            model="gemini-3-flash-preview",
             contents=[
                 "Analyze the image. Determine the fish's orientation and placement. "
                 "The fish is always fully visible. Be precise about the placement category.",

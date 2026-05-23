@@ -47,7 +47,7 @@ def run_pipeline(config: Config):
         DepthStep(config, rotated=rotated),
         SegmentStep(config, rotated=rotated),
         BlackoutStep(config, rotated=rotated),
-        VLMStep(config, rotated=rotated),
+        # VLMStep(config, rotated=rotated),
         FeatureStep(config, rotated=rotated),
     ]
 
