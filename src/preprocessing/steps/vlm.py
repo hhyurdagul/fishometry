@@ -74,7 +74,6 @@ class VLM:
         self.client = genai.Client(api_key=api_key)
 
     def extract_fish_dataset_metadata(self, image: Image.Image) -> dict:
-
         time.sleep(5)
         response = self.client.models.generate_content(
             model="gemini-3-flash-preview",
@@ -83,19 +82,16 @@ class VLM:
                 "The fish is always fully visible. Be precise about the placement category.",
                 image,
             ],
-            config = self.model_config
+            config=self.model_config,
         )
 
-        return json.loads(response.text) # type: ignore
+        return json.loads(response.text)  # type: ignore
+
 
 class VLMStep:
-    def __init__(self, config: Config, rotated: bool = False):
+    def __init__(self, config: Config):
         self.config = config
-        self.input_dir = (
-            config.dataset.output_dir / "rotated"
-            if rotated
-            else config.dataset.input_dir
-        )
+        self.input_dir = config.dataset.input_dir
         self.output_dir = config.dataset.output_dir / "cache" / "vlm"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -104,10 +100,15 @@ class VLMStep:
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         return df.pipe(self._process_images).drop_nulls()
 
-    def _get_features(self, name: str, image_path: Path, output_path: Path) -> dict | None:
+    def _get_features(
+        self, name: str, image_path: Path, output_path: Path
+    ) -> dict | None:
         if output_path.exists():
             with open(output_path, "r") as f:
                 return json.load(f)
+
+        if self.config.dataset.rotate:
+            return None
 
         image = Image.open(image_path)
         features = self.vlm.extract_fish_dataset_metadata(image)

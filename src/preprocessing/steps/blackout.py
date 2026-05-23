@@ -7,13 +7,13 @@ from src.config import Config
 
 
 class BlackoutStep:
-    def __init__(self, config: Config, rotated: bool = False, canvas_size=(224, 224)):
+    def __init__(self, config: Config, canvas_size=(224, 224)):
         self.config = config
         self.canvas_size = canvas_size
 
         self.image_dir = (
             config.dataset.output_dir / "rotated"
-            if rotated
+            if config.dataset.rotate
             else config.dataset.input_dir
         )
         self.mask_dir = config.dataset.output_dir / "segment"

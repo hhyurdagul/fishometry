@@ -4,11 +4,11 @@ from src.config import Config
 
 
 class FeatureStep:
-    def __init__(self, config: Config, rotated: bool = False):
+    def __init__(self, config: Config):
         self.config = config
         self.input_dir = (
             config.dataset.output_dir / "rotated"
-            if rotated
+            if config.dataset.rotate
             else config.dataset.input_dir
         )
 

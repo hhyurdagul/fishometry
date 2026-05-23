@@ -12,7 +12,6 @@ Runs the image preprocessing pipeline including:
 Usage:
     python -m src.preprocessing.run --dataset-name data-inside
 """
-from src.preprocessing.steps.vlm import VLMStep
 
 import polars as pl
 import typer
@@ -23,6 +22,7 @@ from src.preprocessing.steps.depth import DepthStep
 from src.preprocessing.steps.segment import SegmentStep
 from src.preprocessing.steps.blackout import BlackoutStep
 from src.preprocessing.steps.feature import FeatureStep
+from src.preprocessing.steps.vlm import VLMStep
 
 app = typer.Typer(add_completion=False, help="Run the preprocessing pipeline.")
 
@@ -36,19 +36,18 @@ def run_pipeline(config: Config):
         )
 
     config.dataset.output_dir.mkdir(exist_ok=True)
-    rotated = config.dataset.rotate
 
     # Initialize data
     df = pl.read_csv(config.dataset.split_csv_path).drop_nulls()
     steps = [
-        YoloStep(config),
+        YoloStep(config, initial=True),
         RotateStep(config),
-        YoloStep(config, rotated=rotated),
-        DepthStep(config, rotated=rotated),
-        SegmentStep(config, rotated=rotated),
-        BlackoutStep(config, rotated=rotated),
-        # VLMStep(config, rotated=rotated),
-        FeatureStep(config, rotated=rotated),
+        YoloStep(config),
+        DepthStep(config),
+        SegmentStep(config),
+        BlackoutStep(config),
+        VLMStep(config),
+        FeatureStep(config),
     ]
 
     # Run pipeline

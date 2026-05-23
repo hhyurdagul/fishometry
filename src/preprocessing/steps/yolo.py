@@ -43,19 +43,21 @@ class YoloModel:
 
 
 class YoloStep:
-    def __init__(self, config: Config, rotated: bool = False):
+    def __init__(self, config: Config, initial:bool=False):
         self.config = config
-        self.rotated = rotated
+        rotate = config.dataset.rotate
+        if initial:
+            rotate = False
 
         self.input_dir = (
             config.dataset.output_dir / "rotated"
-            if rotated
+            if rotate
             else config.dataset.input_dir
         )
         self.output_dir = (
             config.dataset.output_dir
             / "cache"
-            / f"yolo_{'rotated' if self.rotated else 'initial'}"
+            / f"yolo_{'rotated' if rotate else 'initial'}"
         )
         self.output_dir.mkdir(exist_ok=True, parents=True)
 
@@ -112,4 +114,9 @@ class YoloStep:
             features = self._get_yolo_data(name, image_path, output_path)
             data.append(features)
 
-        return df.join(pl.DataFrame(data), on="name", how="left") if data else df
+        cols_to_drop = []
+        for label in ["Head", "Fish", "Tail"]:
+            for suffix in ["_x1", "_x2", "_y1", "_y2", "w", "h"]:
+                cols_to_drop.append(label+suffix)
+
+        return df.drop(cols_to_drop, strict=False).join(pl.DataFrame(data), on="name", how="left") if data else df
