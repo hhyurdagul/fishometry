@@ -14,7 +14,6 @@ wheels/
 .env.json
 data/
 checkpoints/
-third_party/
 tmp/
 Follow.md
 reports/
