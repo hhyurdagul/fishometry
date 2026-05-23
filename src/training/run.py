@@ -7,6 +7,7 @@ Usage:
     python -m src.training.run --pipeline 1 --dataset data-inside
     python -m src.training.run  # Runs default tasks
 """
+
 from typing import Callable
 
 import polars as pl
@@ -19,7 +20,7 @@ from src.training.models import (
     train_linear_model,
     train_mlp_model,
     train_xgboost_model,
-    train_efficientnet_ridge_model
+    train_efficientnet_ridge_model,
 )
 
 app = typer.Typer(add_completion=False, help="Training orchestrator.")
@@ -27,7 +28,15 @@ app = typer.Typer(add_completion=False, help="Training orchestrator.")
 
 pipeline_function = Callable[[pl.DataFrame, Config, str, bool, bool], pl.DataFrame]
 
-def run_pipeline(task: pipeline_function, df: pl.DataFrame, config: Config, feature_sets: list[str], depth_flag: list[bool], pred_df: pl.DataFrame) -> pl.DataFrame:
+
+def run_pipeline(
+    task: pipeline_function,
+    df: pl.DataFrame,
+    config: Config,
+    feature_sets: list[str],
+    depth_flag: list[bool],
+    pred_df: pl.DataFrame,
+) -> pl.DataFrame:
     for feature_set in feature_sets:
         for depth in depth_flag:
             pred = task(df, config, feature_set, depth, False)
@@ -35,21 +44,34 @@ def run_pipeline(task: pipeline_function, df: pl.DataFrame, config: Config, feat
     return pred_df
 
 
-def run_per_fish_task(task: pipeline_function, df: pl.DataFrame, config: Config, feature_set: str, depth: bool, pred_df: pl.DataFrame) -> pl.DataFrame:
+def run_per_fish_task(
+    task: pipeline_function,
+    df: pl.DataFrame,
+    config: Config,
+    feature_set: str,
+    depth: bool,
+    pred_df: pl.DataFrame,
+) -> pl.DataFrame:
     per_fish_pred = []
     for fish_type in df["fish_type"].unique():
         data = df.filter(pl.col("fish_type") == fish_type)
-        per_fish_pred.append(
-            task(data, config, feature_set, depth, True)
-        )
+        per_fish_pred.append(task(data, config, feature_set, depth, True))
     return pred_df.join(pl.concat(per_fish_pred), on="name", how="left")
 
 
-def run_per_fish_pipeline(task: pipeline_function, df: pl.DataFrame, config: Config, feature_sets: list[str], depth_flag: list[bool], pred_df: pl.DataFrame) -> pl.DataFrame:
+def run_per_fish_pipeline(
+    task: pipeline_function,
+    df: pl.DataFrame,
+    config: Config,
+    feature_sets: list[str],
+    depth_flag: list[bool],
+    pred_df: pl.DataFrame,
+) -> pl.DataFrame:
     for feature_set in feature_sets:
         for depth in depth_flag:
             pred_df = run_per_fish_task(task, df, config, feature_set, depth, pred_df)
     return pred_df
+
 
 @app.command()
 def main(
@@ -63,16 +85,12 @@ def main(
     if config.dataset.fish_type_available:
         cols.insert(1, "fish_type")
 
-
     tasks = [
         train_linear_model,
         train_xgboost_model,
         train_mlp_model,
         train_cnn_model,
     ]
-
-    if "outside" in dataset_name:
-        tasks.append(train_efficientnet_ridge_model)
 
     feature_sets = config.dataset.feature_sets
     depth_flags = config.dataset.depth
@@ -83,10 +101,22 @@ def main(
 
     if config.dataset.fish_type_available:
         for task in tasks:
-            pred_df = run_per_fish_pipeline(task, df, config, feature_sets, depth_flags, pred_df)
+            pred_df = run_per_fish_pipeline(
+                task, df, config, feature_sets, depth_flags, pred_df
+            )
+
+    if "data-outside" == dataset_name:
+        pred_df = run_pipeline(
+            train_efficientnet_ridge_model,
+            df,
+            config,
+            feature_sets,
+            depth_flags,
+            pred_df,
+        )
 
     df.select(cols).join(pred_df, on="name", how="left").write_csv(pred_path)
- 
+
 
 if __name__ == "__main__":
     app()
