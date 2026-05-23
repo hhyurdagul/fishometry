@@ -19,6 +19,7 @@ from src.training.models import (
     train_linear_model,
     train_mlp_model,
     train_xgboost_model,
+    train_efficientnet_ridge_model
 )
 
 app = typer.Typer(add_completion=False, help="Training orchestrator.")
@@ -69,6 +70,9 @@ def main(
         train_mlp_model,
         train_cnn_model,
     ]
+
+    if "outside" in dataset_name:
+        tasks.append(train_efficientnet_ridge_model)
 
     feature_sets = config.dataset.feature_sets
     depth_flags = config.dataset.depth
