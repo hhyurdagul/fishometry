@@ -5,13 +5,16 @@ import streamlit as st
 from src.visualization.data_loading import (
     get_datasets,
     get_depth_models,
+    get_prediction_fish_types,
+    load_prediction_df,
     load_dataset_metadata,
 )
 from src.visualization.views import (
     render_explorer,
     render_analysis,
     render_comparison,
-    render_correlation,
+    render_fish_type_comparison,
+    render_model_fish_type_heatmap,
     render_prediction_viz,
 )
 
@@ -34,7 +37,7 @@ def main():
 
     if df_meta is None:
         st.sidebar.warning(
-            f"Could not load metadata (processed_*.csv) for {selected_dataset}."
+            f"Could not load metadata for {selected_dataset}."
         )
 
     # Load Depth Models
@@ -43,16 +46,21 @@ def main():
     if depth_models:
         selected_depth_model = st.sidebar.selectbox("Depth Model", depth_models)
 
+    df_pred = load_prediction_df(selected_dataset)
+    has_fish_types = bool(get_prediction_fish_types(df_pred))
+    modes = [
+        "Data Explorer",
+        "Prediction Visualization",
+        "Error Analysis",
+        "Model Comparison",
+    ]
+    if has_fish_types:
+        modes.extend(["Fish Type Comparison", "Model x Fish Type Heatmap"])
+
     # 2. Select Mode
     mode = st.sidebar.radio(
         "Mode",
-        [
-            "Data Explorer",
-            "Prediction Visualization",
-            "Error Analysis",
-            "Model Comparison",
-            "Correlation Analysis",
-        ],
+        modes,
     )
 
     if mode == "Data Explorer":
@@ -67,8 +75,10 @@ def main():
         )
     elif mode == "Model Comparison":
         render_comparison(selected_dataset)
-    elif mode == "Correlation Analysis":
-        render_correlation(selected_dataset, df_meta)
+    elif mode == "Fish Type Comparison":
+        render_fish_type_comparison(selected_dataset)
+    elif mode == "Model x Fish Type Heatmap":
+        render_model_fish_type_heatmap(selected_dataset)
 
 
 if __name__ == "__main__":

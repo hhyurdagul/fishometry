@@ -3,13 +3,40 @@
 import streamlit as st
 import polars as pl
 
-from src.visualization.data_loading import load_all_predictions_for_image
+from src.visualization.data_loading import (
+    get_prediction_fish_types,
+    get_prediction_splits,
+    load_all_predictions_for_image,
+    load_prediction_df,
+)
 from src.visualization.image_processing import process_images
 
 
 def render_explorer(dataset, df_meta, all_image_names, depth_model):
     """Render the Data Explorer view."""
     st.header(f"Explorer: {dataset}")
+
+    df_pred = load_prediction_df(dataset)
+    if df_pred is not None:
+        names_source = df_pred
+        fish_types = get_prediction_fish_types(df_pred)
+        splits = get_prediction_splits(df_pred)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            selected_split = st.selectbox("Split", ["all"] + splits)
+        with c2:
+            selected_fish_types = (
+                st.multiselect("Fish Type", fish_types, default=[])
+                if fish_types
+                else []
+            )
+
+        if selected_split != "all":
+            names_source = names_source.filter(pl.col(f"is_{selected_split}") == True)
+        if selected_fish_types and "fish_type" in names_source.columns:
+            names_source = names_source.filter(pl.col("fish_type").is_in(selected_fish_types))
+        all_image_names = names_source["name"].to_list()
 
     if not all_image_names:
         st.warning("No images found in metadata.")
