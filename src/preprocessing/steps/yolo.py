@@ -114,9 +114,9 @@ class YoloStep:
             features = self._get_yolo_data(name, image_path, output_path)
             data.append(features)
 
-        cols_to_drop = []
-        for label in ["Head", "Fish", "Tail"]:
-            for suffix in ["_x1", "_x2", "_y1", "_y2", "w", "h"]:
-                cols_to_drop.append(label+suffix)
+        cols_to_drop = ["Image_w", "Image_h"]
+        for label in ["Head", "Fish", "Tail", "Eye"]:
+            for suffix in ["_x1", "_x2", "_y1", "_y2", "_w", "_h"]:
+                cols_to_drop.append(f"{label}{suffix}")
 
         return df.drop(cols_to_drop, strict=False).join(pl.DataFrame(data), on="name", how="left") if data else df
