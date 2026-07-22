@@ -1,21 +1,20 @@
-import os
 import polars as pl
-import numpy as np
 from src.config import Config
 from src.create_data.steps.base import PipelineStep
+
+RANDOM_SEED = 42
 
 
 class SplitStep(PipelineStep):
     def __init__(self, config: Config):
         super().__init__(config)
-        np.random.seed(42)
 
     def __split_frame(self, df: pl.DataFrame, train_ratio: float, val_ratio: float) -> pl.DataFrame:
 
         train_size = int(len(df) * train_ratio)
         val_size = int(round(len(df) * val_ratio))
         df_sampled = df.sample(
-            fraction=1, shuffle=True
+            fraction=1, shuffle=True, seed=RANDOM_SEED
         ).with_columns(
             pl.lit(False).alias("is_train"), 
             pl.lit(False).alias("is_val"), 
@@ -48,4 +47,4 @@ class SplitStep(PipelineStep):
         else:
             df = self.__split_frame(df, train_ratio, val_ratio)
 
-        return df.sample(fraction=1, shuffle=True), self.config
+        return df.sample(fraction=1, shuffle=True, seed=RANDOM_SEED), self.config
