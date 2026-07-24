@@ -72,7 +72,7 @@ class SegmentStep:
             points = np.array([[head_cx, head_cy], [tail_cx, tail_cy]])
             labels = np.ones(len(points))
 
-            image = cv2.imread(image_path)
+            image = cv2.imread(str(image_path))
             if image is None:
                 raise ValueError(f"Could not read image: {image_path}")
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -136,8 +136,9 @@ class SegmentStep:
 
         data = []
         for row in tqdm(rows, desc="Segmentation"):
-            if not all(row.values()):
+            if any(value is None for value in row.values()):
                 print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+                continue
 
             name = row["name"]
             image_path = self.input_dir / name

@@ -26,17 +26,22 @@ class BlackoutStep:
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
         names = df["name"].drop_nulls().to_list()
 
+        valid_names = []
         for name in tqdm(names, desc="Blackout & Center"):
             image_path = self.image_dir / name
             mask_path = self.mask_dir / (name + ".npy")
             output_path = self.output_dir / name
 
-            if not image_path.exists() or not mask_path.exists() or output_path.exists():
+            if not image_path.exists() or not mask_path.exists():
+                continue
+
+            if output_path.exists():
+                valid_names.append(name)
                 continue
 
             try:
                 # Load
-                img = cv2.imread(image_path)
+                img = cv2.imread(str(image_path))
                 mask = np.load(mask_path)
 
                 if img is None:
@@ -93,9 +98,10 @@ class BlackoutStep:
                 canvas[y_off : y_off + new_h, x_off : x_off + new_w] = resized_fish
 
                 # Save
-                cv2.imwrite(output_path, canvas)
+                cv2.imwrite(str(output_path), canvas)
+                valid_names.append(name)
 
             except Exception as e:
                 print(f"Error processing {name}: {e}")
-
-        return df
+        
+        return df.drop_nulls().filter(pl.col("name").is_in(valid_names))

@@ -107,9 +107,6 @@ class VLMStep:
             with open(output_path, "r") as f:
                 return json.load(f)
 
-        if self.config.dataset.rotate:
-            return None
-
         image = Image.open(image_path)
         features = self.vlm.extract_fish_dataset_metadata(image)
 
@@ -120,12 +117,13 @@ class VLMStep:
         return features
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
-        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: ignore
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)
 
         data = []
         for row in tqdm(rows, desc="Vision Language Model"):
-            if not all(row.values()):
+            if any(value is None for value in row.values()):
                 print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+                continue
 
             name = row["name"]
             image_path = self.input_dir / name

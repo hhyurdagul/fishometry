@@ -25,9 +25,10 @@ class RotateStep():
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
         rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: list[dict]
 
-        for row in tqdm(rows, desc="Segmentation"):
-            if not all(row.values()):
+        for row in tqdm(rows, desc="Rotation"):
+            if any(value is None for value in row.values()):
                 print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+                continue
 
             name = row["name"]
             image_path = self.input_dir / name
@@ -38,14 +39,14 @@ class RotateStep():
 
             try:
                 rotated_image, _ = self._rotate_and_crop(image_path, row)
-                cv2.imwrite(output_path, rotated_image)
+                cv2.imwrite(str(output_path), rotated_image)
             except Exception as e:
                 print(f"Error rotating {name}: {e}")
 
         return df
 
     def _rotate_and_crop(self, image_path: Path, data: dict) -> tuple[np.ndarray, dict]:
-        image = cv2.imread(image_path)
+        image = cv2.imread(str(image_path))
         h, w = image.shape[:2] # type: ignore
 
         # 1. Calculate Angle (Tail to Head)

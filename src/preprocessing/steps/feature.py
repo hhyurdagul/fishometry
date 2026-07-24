@@ -54,7 +54,7 @@ class FeatureStep:
         dummies = list(
             filter(
                 lambda x: x in columns,
-                ["fish_placement", "fish_orientation", "lightning_condition"],
+                ["fish_placement", "fish_orientation", "lighting_condition"],
             )
         )
         if dummies:

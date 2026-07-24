@@ -26,7 +26,7 @@ class DepthModel:
                     f"DepthAnythingV2 model not found at path: {model_path}"
                 )
             print(
-                f"Warning: DepthAnythingV2 weights not found at {self.model_path}, downloading..."
+                f"Warning: DepthAnythingV2 weights not found at {model_path}, downloading..."
             )
 
             torch.hub.download_url_to_file(
@@ -88,7 +88,7 @@ class DepthStep:
         if output_path.exists():
             depth = np.load(output_path)
         else:
-            image = cv2.imread(image_path)
+            image = cv2.imread(str(image_path))
             if image is None:
                 raise ValueError(f"Could not read image: {image_path}")
 
@@ -126,7 +126,7 @@ class DepthStep:
         head_depth = self._get_robust_depth(depth, head_cx, head_cy, 9)
         body_depth = self._get_robust_depth(depth, body_cx, body_cy, 9)
         tail_depth = self._get_robust_depth(depth, tail_cx, tail_cy, 9)
-        depth_gradient = head_depth = tail_depth
+        depth_gradient = head_depth - tail_depth
 
         return {
             "name": data["name"],
@@ -142,8 +142,9 @@ class DepthStep:
 
         data = []
         for row in tqdm(rows, desc="Depth Estimation"):
-            if not all(row.values()):
+            if any(value is None for value in row.values()):
                 print(f"Skipping {row['name']} due to missing Head/Tail coordinates.")
+                continue
 
             name = row["name"]
             image_path = self.input_dir / name

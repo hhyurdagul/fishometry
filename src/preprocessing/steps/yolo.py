@@ -83,7 +83,7 @@ class YoloStep:
             with open(output_path, "r") as f:
                 return json.load(f)
 
-        boxes, image_w, image_h = self.yolo_model.predict(image_path)
+        boxes, image_h, image_w = self.yolo_model.predict(image_path)
         if boxes is None:
             return {}
 
@@ -115,7 +115,7 @@ class YoloStep:
             data.append(features)
 
         cols_to_drop = ["Image_w", "Image_h"]
-        for label in ["Head", "Fish", "Tail", "Eye"]:
+        for label in self.config.params.yolo_classes:
             for suffix in ["_x1", "_x2", "_y1", "_y2", "_w", "_h"]:
                 cols_to_drop.append(f"{label}{suffix}")
 
