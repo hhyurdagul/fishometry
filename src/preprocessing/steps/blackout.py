@@ -104,4 +104,4 @@ class BlackoutStep:
             except Exception as e:
                 print(f"Error processing {name}: {e}")
         
-        return df.drop_nulls().filter(pl.col("name").is_in(valid_names))
+        return df.filter(pl.col("name").is_in(valid_names))

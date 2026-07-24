@@ -58,8 +58,12 @@ class MLPRegressor:
         self.lr = lr
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = FishMLP(input_dim).to(self.device)
+        self.scaler = StandardScaler()
 
     def fit(self, X, y, X_val, y_val):
+        X = self.scaler.fit_transform(X)
+        X_val = self.scaler.transform(X_val)
+
         dataset = TabularDataset(X, y)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
@@ -109,6 +113,7 @@ class MLPRegressor:
         return self
 
     def predict(self, X):
+        X = self.scaler.transform(X)
         dataset = TabularDataset(X, np.zeros(len(X), dtype=np.float32))
         loader = DataLoader(dataset, batch_size=self.batch_size)
 
@@ -127,6 +132,8 @@ class MLPRegressor:
             {
                 "model_state_dict": self.model.state_dict(),
                 "input_dim": self.input_dim,
+                "scaler_mean": self.scaler.mean_,
+                "scaler_scale": self.scaler.scale_,
             },
             path,
         )

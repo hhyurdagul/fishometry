@@ -32,7 +32,7 @@ class ParamConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate(self):
+    def validate_params(self):
         if self.train_ratio + self.val_ratio + self.test_ratio > 1.0:
             raise ValueError("Train, val, and test ratios must sum to less than 1.0")
         return self
@@ -42,7 +42,7 @@ class DatasetConfig(BaseModel):
     name: str
     rotate: bool = True
     fish_type_available: bool = False
-    feature_sets: list[str] = ["coords", "scaled"]
+    feature_sets: list[str] = ["coords", "eye", "features"]
     depth: list[bool] = [True, False]
 
     @computed_field
@@ -76,7 +76,7 @@ class DatasetConfig(BaseModel):
         return self.dataset_dir / "processed"
 
     @model_validator(mode="after")
-    def validate(self):
+    def validate_dataset(self):
         if not (DATA_ROOT / self.name).exists():
             raise ValueError(f"Dataset `{self.name}` does not exist")
         if not self.input_dir.exists():

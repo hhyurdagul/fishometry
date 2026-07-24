@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from PIL import Image
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
@@ -164,6 +165,7 @@ class CNNRegressor:
         self.lr = lr
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = FishModel(aux_size=aux_size).to(self.device)
+        self.aux_scaler: StandardScaler | None = None
 
     def _build_loader(self, dataset: FishImageDataset, shuffle: bool = False) -> DataLoader:
         batch_size = min(self.batch_size, len(dataset)) if len(dataset) > 0 else self.batch_size
@@ -258,13 +260,14 @@ class CNNRegressor:
         return np.asarray(predictions, dtype=np.float32)
 
     def save(self, path: str):
-        torch.save(
-            {
-                "model_state_dict": self.model.state_dict(),
-                "aux_size": self.aux_size,
-            },
-            path,
-        )
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "aux_size": self.aux_size,
+        }
+        if self.aux_scaler is not None:
+            checkpoint["aux_scaler_mean"] = self.aux_scaler.mean_
+            checkpoint["aux_scaler_scale"] = self.aux_scaler.scale_
+        torch.save(checkpoint, path)
 
 
 def build_cnn_model(
@@ -281,10 +284,13 @@ def build_image_dataset(
     image_dir: Path,
     feature_exprs: list[pl.Expr],
     transform: transforms.Compose | None = None,
+    aux_scaler: StandardScaler | None = None,
 ) -> FishImageDataset:
     names = df["name"].to_list()
     targets = df["length"].to_numpy().ravel().astype(np.float32)
     aux_features = select_aux_features(df, feature_exprs)
+    if aux_scaler is not None and aux_features.shape[1] > 0:
+        aux_features = aux_scaler.transform(aux_features).astype(np.float32, copy=False)
     return FishImageDataset(names, targets, image_dir, aux_features, transform)
 
 
@@ -304,19 +310,26 @@ def run_cnn_pipeline(
         raise FileNotFoundError(f"Blackout image directory not found: {image_dir}")
 
     transform = build_image_transform()
+
+    train_df = df.filter(pl.col("is_train"))
+    val_df = df.filter(pl.col("is_val"))
+
+    # Fit the auxiliary-feature scaler on training rows only, then reuse it
+    # for the validation and prediction datasets to avoid leakage.
+    aux_scaler: StandardScaler | None = None
+    train_aux = select_aux_features(train_df, feature_exprs)
+    if train_aux.shape[1] > 0:
+        aux_scaler = StandardScaler().fit(train_aux)
+
     train_dataset = build_image_dataset(
-        df.filter(pl.col("is_train")),
-        image_dir,
-        feature_exprs,
-        transform,
+        train_df, image_dir, feature_exprs, transform, aux_scaler
     )
     val_dataset = build_image_dataset(
-        df.filter(pl.col("is_val")),
-        image_dir,
-        feature_exprs,
-        transform,
+        val_df, image_dir, feature_exprs, transform, aux_scaler
     )
-    pred_dataset = build_image_dataset(df, image_dir, feature_exprs, transform)
+    pred_dataset = build_image_dataset(
+        df, image_dir, feature_exprs, transform, aux_scaler
+    )
 
     print(f"Training {feature_desc} model on {config.dataset.name}...")
 
@@ -326,6 +339,7 @@ def run_cnn_pipeline(
         batch_size=batch_size,
         lr=lr,
     )
+    model.aux_scaler = aux_scaler
     model.fit(train_dataset, val_dataset)
     pred = model.predict(pred_dataset)
 
@@ -335,7 +349,7 @@ def run_cnn_pipeline(
 
     pred = pl.DataFrame(
         {
-            "name": df["name"].to_numpy(),
+            "name": pred_dataset.names,
             feature_desc: np.round(pred, 2),
         }
     )
