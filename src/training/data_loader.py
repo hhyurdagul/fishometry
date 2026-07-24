@@ -68,7 +68,7 @@ def get_feature_names_and_desc(
             [
                 pl.selectors.starts_with("fish_placement_"),
                 pl.selectors.starts_with("fish_orientation_"),
-                pl.selectors.starts_with("lightning_condition_"),
+                pl.selectors.starts_with("lighting_condition_"),
             ]
         )
 

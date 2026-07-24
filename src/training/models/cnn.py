@@ -41,14 +41,16 @@ def get_cnn_feature_spec(
 ) -> tuple[list[pl.Expr], str]:
     if feature_set is None:
         feature_desc = "cnn"
-        feature_exprs: list[pl.Expr] = []
+        feature_exprs: list[pl.Expr] = [pl.selectors.starts_with("fish_type_")]
         if depth:
             feature_exprs.append(
                 pl.col(
                     [
-                        "head_center_depth",
-                        "fish_center_depth",
-                        "tail_center_depth",
+                        "head_depth",
+                        "body_depth",
+                        "tail_depth",
+                        "depth_gradient_raw",
+                        "depth_gradient_abs",
                     ]
                 )
             )
