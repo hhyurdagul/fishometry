@@ -7,6 +7,7 @@ Usage:
     python -m src.training.run --pipeline 1 --dataset data-inside
     python -m src.training.run  # Runs default tasks
 """
+from genericpath import exists
 
 import os
 import random
@@ -174,7 +175,7 @@ def main(
     pred_df.write_csv(pred_path)
 
     os.makedirs("reports", exist_ok=True)
-    os.makedirs(os.path.join("reports", dataset_name))
+    os.makedirs(os.path.join("reports", dataset_name), exist_ok=True)
     for split in ("is_train", "is_val", "is_test"):
         save_metrics(pred_df, dataset_name, split)
 
