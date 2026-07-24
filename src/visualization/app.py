@@ -4,7 +4,6 @@ import streamlit as st
 
 from src.visualization.data_loading import (
     get_datasets,
-    get_depth_models,
     get_prediction_fish_types,
     load_prediction_df,
     load_dataset_metadata,
@@ -40,12 +39,6 @@ def main():
             f"Could not load metadata for {selected_dataset}."
         )
 
-    # Load Depth Models
-    depth_models = get_depth_models(selected_dataset)
-    selected_depth_model = None
-    if depth_models:
-        selected_depth_model = st.sidebar.selectbox("Depth Model", depth_models)
-
     df_pred = load_prediction_df(selected_dataset)
     has_fish_types = bool(get_prediction_fish_types(df_pred))
     modes = [
@@ -64,15 +57,11 @@ def main():
     )
 
     if mode == "Data Explorer":
-        render_explorer(
-            selected_dataset, df_meta, all_image_names, selected_depth_model
-        )
+        render_explorer(selected_dataset, df_meta, all_image_names)
     elif mode == "Prediction Visualization":
         render_prediction_viz(selected_dataset)
     elif mode == "Error Analysis":
-        render_analysis(
-            selected_dataset, df_meta, all_image_names, selected_depth_model
-        )
+        render_analysis(selected_dataset, df_meta, all_image_names)
     elif mode == "Model Comparison":
         render_comparison(selected_dataset)
     elif mode == "Fish Type Comparison":

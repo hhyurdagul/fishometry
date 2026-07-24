@@ -12,7 +12,7 @@ from src.visualization.data_loading import (
 from src.visualization.image_processing import process_images
 
 
-def render_explorer(dataset, df_meta, all_image_names, depth_model):
+def render_explorer(dataset, df_meta, all_image_names):
     """Render the Data Explorer view."""
     st.header(f"Explorer: {dataset}")
 
@@ -33,7 +33,7 @@ def render_explorer(dataset, df_meta, all_image_names, depth_model):
             )
 
         if selected_split != "all":
-            names_source = names_source.filter(pl.col(f"is_{selected_split}") == True)
+            names_source = names_source.filter(pl.col(f"is_{selected_split}"))
         if selected_fish_types and "fish_type" in names_source.columns:
             names_source = names_source.filter(pl.col("fish_type").is_in(selected_fish_types))
         all_image_names = names_source["name"].to_list()
@@ -62,7 +62,7 @@ def render_explorer(dataset, df_meta, all_image_names, depth_model):
 
     # Process Images
     img_raw, img_rot, img_depth, img_blackout = process_images(
-        dataset, selected_img, row_data, depth_model
+        dataset, selected_img, row_data
     )
 
     # Display Grid

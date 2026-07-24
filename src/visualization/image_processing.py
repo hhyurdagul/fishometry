@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 
-def get_image_paths(dataset, image_name, depth_model=None):
+def get_image_paths(dataset, image_name):
     """Resolve paths for raw, rotated, depth, and blackout images."""
     # Try finding image in raw or splits
     found_path = None
@@ -21,24 +21,13 @@ def get_image_paths(dataset, image_name, depth_model=None):
 
     rot_path = f"data/{dataset}/processed/rotated/{image_name}"
 
-    # Depth extension check
+    # Depth map (flat layout: processed/depth/<name>.npy)
     depth_path = None
-    if depth_model:
-        base_depth_dir = f"data/{dataset}/processed/depth/{depth_model}"
-        p = f"{base_depth_dir}/{image_name.replace('.jpg', '.npy').replace('.jpeg', '.npy')}"
-        if not os.path.exists(p):
-            p = f"{base_depth_dir}/{image_name}.npy"
-
-        if os.path.exists(p):
-            depth_path = p
-
-    # Fallback to root depth folder if not found or no model selected
-    if not depth_path:
-        p = f"data/{dataset}/processed/depth/{image_name.replace('.jpg', '.npy').replace('.jpeg', '.npy')}"
-        if not os.path.exists(p):
-            p = f"data/{dataset}/processed/depth/{image_name}.npy"
-        if os.path.exists(p):
-            depth_path = p
+    p = f"data/{dataset}/processed/depth/{image_name.replace('.jpg', '.npy').replace('.jpeg', '.npy')}"
+    if not os.path.exists(p):
+        p = f"data/{dataset}/processed/depth/{image_name}.npy"
+    if os.path.exists(p):
+        depth_path = p
 
     # Blackout image path
     blackout_path = f"data/{dataset}/processed/blackout/{image_name}"
@@ -53,10 +42,10 @@ def get_image_paths(dataset, image_name, depth_model=None):
     return found_path, rot_path, depth_path, blackout_path
 
 
-def process_images(dataset, image_name, data_row, depth_model=None):
+def process_images(dataset, image_name, data_row):
     """Load and process all image variants for display."""
     raw_path, rot_path, depth_path, blackout_path = get_image_paths(
-        dataset, image_name, depth_model
+        dataset, image_name
     )
 
     # Raw image

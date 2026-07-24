@@ -14,7 +14,7 @@ from src.visualization.data_loading import (
 from src.visualization.image_processing import process_images
 
 
-def render_analysis(dataset, df_meta, all_image_names, depth_model):
+def render_analysis(dataset, df_meta, all_image_names):
     """Render the Error Analysis view."""
     st.header(f"Error Analysis: {dataset}")
 
@@ -105,7 +105,7 @@ def render_analysis(dataset, df_meta, all_image_names, depth_model):
         row_data["Specific Prediction"]["Fish Type"] = img_row["fish_type"]
 
     img_raw, img_rot, img_depth, _ = process_images(
-        dataset, selected_err_img, row_data, depth_model
+        dataset, selected_err_img, row_data
     )
 
     c1, c2, c3 = st.columns(3)

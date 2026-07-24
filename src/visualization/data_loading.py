@@ -80,7 +80,7 @@ def get_prediction_splits(df_pred):
     splits = []
     for split in ["train", "val", "test"]:
         col = f"is_{split}"
-        if col in df_pred.columns and df_pred.filter(pl.col(col) == True).height > 0:
+        if col in df_pred.columns and df_pred.filter(pl.col(col)).height > 0:
             splits.append(split)
     return splits
 
@@ -138,7 +138,7 @@ def normalize_predictions(df_pred, model_columns=None, split=None, fish_types=No
     if split:
         split_col = f"is_{split}"
         if split_col in df.columns:
-            df = df.filter(pl.col(split_col) == True)
+            df = df.filter(pl.col(split_col))
 
     if fish_types and "fish_type" in df.columns:
         df = df.filter(pl.col("fish_type").is_in(fish_types))
@@ -177,13 +177,3 @@ def load_all_predictions_for_image(dataset, image_name):
 
     data = row.to_dicts()[0]
     return {model: data[model] for model in get_prediction_model_columns(df_pred)}
-
-
-@st.cache_data
-def get_depth_models(dataset):
-    """Get list of available depth models for a dataset."""
-    base_dir = f"data/{dataset}/processed/depth"
-    if not os.path.exists(base_dir):
-        return []
-    dirs = [d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
-    return sorted(dirs)
