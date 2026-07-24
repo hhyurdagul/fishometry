@@ -8,9 +8,13 @@ Usage:
     python -m src.training.run  # Runs default tasks
 """
 
+import os
+import random
 from typing import Callable
 
+import numpy as np
 import polars as pl
+import torch
 import typer
 
 from src.config import Config, get_config
@@ -24,6 +28,20 @@ from src.training.models import (
 )
 
 app = typer.Typer(add_completion=False, help="Training orchestrator.")
+
+RANDOM_SEED = 42
+MIN_PER_TYPE_TRAIN_ROWS = 10
+
+
+def seed_everything(seed: int = RANDOM_SEED) -> None:
+    """Seed Python, NumPy and Torch so MLP/CNN runs are reproducible."""
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 pipeline_function = Callable[[pl.DataFrame, Config, str, bool, bool], pl.DataFrame]
@@ -55,7 +73,17 @@ def run_per_fish_task(
     per_fish_pred = []
     for fish_type in df["fish_type"].unique():
         data = df.filter(pl.col("fish_type") == fish_type)
+        train_rows = data.filter(pl.col("is_train")).height
+        if train_rows < MIN_PER_TYPE_TRAIN_ROWS:
+            print(
+                f"Skipping per-type model for {fish_type}: "
+                f"{train_rows} train rows (< {MIN_PER_TYPE_TRAIN_ROWS})"
+            )
+            continue
         per_fish_pred.append(task(data, config, feature_set, depth, True))
+
+    if not per_fish_pred:
+        return pred_df
     return pred_df.join(pl.concat(per_fish_pred), on="name", how="left")
 
 
@@ -75,8 +103,9 @@ def run_per_fish_pipeline(
 
 @app.command()
 def main(
-    dataset_name: str = typer.Option(None, help="Specific dataset"),
+    dataset_name: str = typer.Option(..., help="Specific dataset"),
 ):
+    seed_everything()
     config = get_config(dataset_name)
     df = pl.read_csv(config.dataset.output_csv_path).drop_nulls()
 

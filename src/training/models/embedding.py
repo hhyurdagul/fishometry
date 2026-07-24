@@ -8,6 +8,7 @@ features from the rotated images plus tabular geometry features, then fits a
 per-species Ridge regressor.
 """
 
+import json
 from pathlib import Path
 
 import joblib
@@ -81,15 +82,23 @@ def _load_or_create_embeddings(df: pl.DataFrame, config: Config, model_dir: Path
     if not image_dir.exists():
         raise FileNotFoundError(f"Rotated image directory not found: {image_dir}")
 
+    names = df["name"].to_list()
     cache_path = model_dir / "efficientnet_b3_rotated_embeddings.npy"
-    if cache_path.exists():
-        return np.load(cache_path)
+    names_path = model_dir / "efficientnet_b3_rotated_embeddings_names.json"
+
+    # Only reuse the cache when it was built for this exact ordered name list,
+    # otherwise embeddings would bind to the wrong rows after processed.csv changes.
+    if cache_path.exists() and names_path.exists():
+        with names_path.open("r", encoding="utf-8") as f:
+            cached_names = json.load(f)
+        if cached_names == names:
+            return np.load(cache_path)
 
     model, transform = _build_efficientnet_b3()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device).eval()
     loader = DataLoader(
-        ImageNameDataset(image_dir, df["name"].to_list(), transform),
+        ImageNameDataset(image_dir, names, transform),
         batch_size=8,
         shuffle=False,
         num_workers=0,
@@ -103,6 +112,8 @@ def _load_or_create_embeddings(df: pl.DataFrame, config: Config, model_dir: Path
 
     result = np.vstack(embeddings).astype(np.float32)
     np.save(cache_path, result)
+    with names_path.open("w", encoding="utf-8") as f:
+        json.dump(names, f)
     return result
 
 

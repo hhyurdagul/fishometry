@@ -21,11 +21,9 @@ def get_image_paths(dataset, image_name):
 
     rot_path = f"data/{dataset}/processed/rotated/{image_name}"
 
-    # Depth map (flat layout: processed/depth/<name>.npy)
+    # Depth map (flat layout: processed/depth/<name>.npy, name keeps its extension)
     depth_path = None
-    p = f"data/{dataset}/processed/depth/{image_name.replace('.jpg', '.npy').replace('.jpeg', '.npy')}"
-    if not os.path.exists(p):
-        p = f"data/{dataset}/processed/depth/{image_name}.npy"
+    p = f"data/{dataset}/processed/depth/{image_name}.npy"
     if os.path.exists(p):
         depth_path = p
 

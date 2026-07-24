@@ -145,7 +145,7 @@ def build_linear_model() -> Pipeline:
 
 def build_xgboost_model(
     n_estimators: int = 100,
-    max_depth: int = 16,
+    max_depth: int = 4,
     learning_rate: float = 0.1,
 ) -> Pipeline:
     return Pipeline([
