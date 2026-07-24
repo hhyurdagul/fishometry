@@ -101,6 +101,32 @@ def run_per_fish_pipeline(
     return pred_df
 
 
+def save_metrics(pred_df: pl.DataFrame, dataset_name: str, split: str) -> None:
+    """Write per-model mae/mape/rmse/r2 for one split to reports/<split>.csv."""
+    path = os.path.join("reports", dataset_name, split[3:] + ".csv")
+    data = pred_df.filter(pl.col(split))
+
+    target = pl.col("length")
+    error = pl.selectors.numeric().exclude("length") - target
+    # Total sum of squares of the target, shared by every model column.
+    sstot = ((target - target.mean()) ** 2).sum()
+
+    metrics = {
+        "mae": error.abs().mean(),
+        "mape": (error / target).abs().mean() * 100,
+        "rmse": (error**2).mean().sqrt(),
+        # Written as `-SSres / SStot + 1` so the model column names survive.
+        "r2": -(error**2).sum() / sstot + 1,
+    }
+
+    report = None
+    for metric, expr in metrics.items():
+        values = data.select(expr).unpivot(variable_name="model", value_name=metric)
+        report = values if report is None else report.join(values, on="model")
+
+    report.sort("mape").with_columns(pl.selectors.numeric().round(2)).write_csv(path)
+
+
 @app.command()
 def main(
     dataset_name: str = typer.Option(..., help="Specific dataset"),
@@ -144,7 +170,13 @@ def main(
             pred_df,
         )
 
-    df.select(cols).join(pred_df, on="name", how="left").write_csv(pred_path)
+    pred_df = df.select(cols).join(pred_df, on="name", how="left")
+    pred_df.write_csv(pred_path)
+
+    os.makedirs("reports", exist_ok=True)
+    os.makedirs(os.path.join("reports", dataset_name))
+    for split in ("is_train", "is_val", "is_test"):
+        save_metrics(pred_df, dataset_name, split)
 
 
 if __name__ == "__main__":
