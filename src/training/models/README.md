@@ -164,6 +164,61 @@ Later variants and later runs load that array whenever the file exists. The cach
 
 Each Ridge artifact is a `.joblib` dictionary containing the fitted routed model, feature-set/depth/per-type values, fish-type lookup, and image-backbone/source labels. It does not include the image embeddings or pretrained backbone weights.
 
+## Outside Multi-View DINOv2/Ridge Model
+
+This model runs only in the standard `data-outside` orchestration and has the same shape as the EfficientNet/Ridge model — frozen image features concatenated with tabular geometry, fitted per fish type with a ridge. It differs in three ways that were measured to matter on the outdoor data.
+
+### Self-supervised backbone
+
+The image features come from DINOv2 (`dinov2_vitb14` and `dinov2_vitl14`, loaded from `facebookresearch/dinov2` through `torch.hub`) rather than an ImageNet classifier. Held-out comparisons on this dataset put DINOv2 features well ahead of EfficientNet-B3, ConvNeXt-Base, EfficientNetV2-M and Swin-V2-B features, and the ImageNet backbones were not distinguishable from one another.
+
+### Multiple views per image
+
+Each image is embedded nine times, under different resolutions and framings, and the results are concatenated:
+
+| Backbone | Source | Size | Framing |
+| --- | --- | ---: | --- |
+| `dinov2_vitb14` | `rotated` | 224 | squash |
+| `dinov2_vitb14` | `rotated` | 336 | squash |
+| `dinov2_vitb14` | `rotated` | 448 | crop |
+| `dinov2_vitb14` | `rotated` | 518 | squash |
+| `dinov2_vitb14` | `blackout` | 224 | squash |
+| `dinov2_vitl14` | `rotated` | 224 | squash |
+| `dinov2_vitl14` | `rotated` | 336 | squash |
+| `dinov2_vitl14` | `rotated` | 448 | squash |
+| `dinov2_vitl14` | `rotated` | 448 | crop |
+
+`squash` resizes the whole frame to a square and accepts the aspect distortion; `crop` resizes the short side and takes a centre crop. The two framings retain different amounts of surrounding scene, which is where the monocular scale cues sit. The single `blackout` view sees the isolated fish with no context and contributes a different error pattern. All sizes are multiples of the 14-pixel DINOv2 patch.
+
+### Derived geometry features
+
+Beyond the configured feature set, the model derives further inputs from columns already present in `processed.csv`, so no preprocessing rerun is required:
+
+- Scale-referenced spans: straight-line head-to-tail pixel distance and fish box diagonal, each divided by the image diagonal; mask area and major axis relative to the image diagonal.
+- Dimensionless body proportions: head and tail box size relative to the fish diagonal, head-to-tail box ratio, head and tail aspect ratios, mask fill ratio, perimeter-squared-over-area compactness, major-over-minor elongation.
+- Frame placement: fish centre coordinates as image fractions, image aspect ratio and diagonal.
+- Depth contrasts: body-minus-background relative depth, absolute head-minus-tail relative depth.
+- Log transforms of the size-valued columns above.
+
+### Shrunk per-species ridge
+
+The regression pipeline is the same median-impute, standard-scale, `RidgeCV` stack, over 120 alphas from `1e-3` to `1e8`. A global pipeline is fitted on all training rows, and a separate pipeline is fitted for each fish type with at least eight training rows. Unlike the EfficientNet/Ridge model, an eligible type's prediction is not replaced outright: it is a `0.85 / 0.15` blend of the species pipeline and the global pipeline. The shrinkage stabilises types whose training count is small relative to the feature width.
+
+Validation flags are ignored; RidgeCV selects alpha by internal cross-validation over training rows, and test targets are never used. Output names are `dino_ridge_<feature-set>[_depth]`, without `_per_type`, because the type routing is internal.
+
+### Cache and artifact
+
+Each view writes its own cache under `checkpoints/<dataset-name>/`:
+
+```text
+dino_<backbone>_<source>_<size>_<framing>.npy
+dino_<backbone>_<source>_<size>_<framing>_names.json
+```
+
+The companion `_names.json` records the exact ordered image-name list the array was built for. The cache is reused only when that list matches the current dataframe, so a reordered or filtered `processed.csv` triggers re-extraction instead of silently binding embeddings to the wrong rows. Extraction needs network access on first run to fetch the DINOv2 weights.
+
+The `.joblib` artifact holds the fitted blended model, feature-set/depth/per-type values, fish-type lookup, backbone label, and the view list. It does not include embeddings or backbone weights.
+
 ## Checkpoint Summary
 
 All artifacts are written under `checkpoints/<dataset-name>/`.
@@ -177,6 +232,8 @@ All artifacts are written under `checkpoints/<dataset-name>/`.
 | CNN | `.pth` | State dictionary and auxiliary width | No |
 | EfficientNet/Ridge | `.joblib` | Routed Ridge model and metadata | No |
 | EfficientNet embeddings | `.npy` | Ordered embedding matrix | Yes, based only on file existence |
+| DINOv2/Ridge | `.joblib` | Blended Ridge model and metadata | No |
+| DINOv2 embeddings | `.npy` + `.json` | Ordered embedding matrix per view, with its name manifest | Yes, only when the manifest matches the current rows |
 
 Artifacts with the same experiment name are overwritten without confirmation. There is no checkpoint loading, resume, or skip-existing path for learned models.
 

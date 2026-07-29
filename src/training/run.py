@@ -7,8 +7,6 @@ Usage:
     python -m src.training.run --pipeline 1 --dataset data-inside
     python -m src.training.run  # Runs default tasks
 """
-from genericpath import exists
-
 import os
 import random
 from typing import Callable
@@ -26,6 +24,7 @@ from src.training.models import (
     train_mlp_model,
     train_xgboost_model,
     train_efficientnet_ridge_model,
+    train_dino_ridge_model,
 )
 
 app = typer.Typer(add_completion=False, help="Training orchestrator.")
@@ -162,14 +161,15 @@ def main(
             )
 
     if "data-outside" == dataset_name:
-        pred_df = run_pipeline(
-            train_efficientnet_ridge_model,
-            df,
-            config,
-            feature_sets,
-            depth_flags,
-            pred_df,
-        )
+        for image_task in (train_efficientnet_ridge_model, train_dino_ridge_model):
+            pred_df = run_pipeline(
+                image_task,
+                df,
+                config,
+                feature_sets,
+                depth_flags,
+                pred_df,
+            )
 
     pred_df = df.select(cols).join(pred_df, on="name", how="left")
     pred_df.write_csv(pred_path)
