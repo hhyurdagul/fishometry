@@ -1,4 +1,3 @@
-
 """
 Image-embedding regression helpers.
 
@@ -11,7 +10,6 @@ per-species Ridge regressor.
 import json
 from pathlib import Path
 
-import joblib
 import numpy as np
 import polars as pl
 import torch
@@ -24,7 +22,17 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models
 
+from src.artifacts import (
+    atomic_save_numpy,
+    atomic_write_json,
+    content_manifest,
+)
 from src.config import Config
+from src.training.artifacts import (
+    atomic_joblib_dump,
+    checkpoint_directory,
+    checkpoint_stem,
+)
 from src.training.data_loader import get_feature_names_and_desc
 
 
@@ -42,7 +50,9 @@ class PerSpeciesRegressor(BaseEstimator, RegressorMixin):
         for species_code in np.unique(species_codes):
             mask = species_codes == species_code
             if int(mask.sum()) >= 8:
-                self.models_[int(species_code)] = clone(self.base_estimator).fit(base_x[mask], y[mask])
+                self.models_[int(species_code)] = clone(self.base_estimator).fit(
+                    base_x[mask], y[mask]
+                )
         return self
 
     def predict(self, x):
@@ -65,9 +75,10 @@ class ImageNameDataset(Dataset):
     def __len__(self) -> int:
         return len(self.names)
 
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        with Image.open(self.image_dir / self.names[idx]) as image:
-            return self.transform(image.convert("RGB"))
+    def __getitem__(self, index: int) -> torch.Tensor:
+        with Image.open(self.image_dir / self.names[index]) as source:
+            image = source.convert("RGB")
+        return self.transform(image)
 
 
 def _build_efficientnet_b3():
@@ -77,7 +88,9 @@ def _build_efficientnet_b3():
     return model, weights.transforms()
 
 
-def _load_or_create_embeddings(df: pl.DataFrame, config: Config, model_dir: Path) -> np.ndarray:
+def _load_or_create_embeddings(
+    df: pl.DataFrame, config: Config, model_dir: Path
+) -> np.ndarray:
     image_dir = config.dataset.output_dir / "rotated"
     if not image_dir.exists():
         raise FileNotFoundError(f"Rotated image directory not found: {image_dir}")
@@ -86,14 +99,16 @@ def _load_or_create_embeddings(df: pl.DataFrame, config: Config, model_dir: Path
     cache_path = model_dir / "efficientnet_b3_rotated_embeddings.npy"
     names_path = model_dir / "efficientnet_b3_rotated_embeddings_names.json"
 
-    # Only reuse the cache when it was built for this exact ordered name list,
-    # otherwise embeddings would bind to the wrong rows after processed.csv changes.
-    if cache_path.exists() and names_path.exists():
-        with names_path.open("r", encoding="utf-8") as f:
-            cached_names = json.load(f)
-        if cached_names == names:
-            return np.load(cache_path)
-
+    manifest = {
+        "schema": 1,
+        "backbone": "efficientnet_b3",
+        "weights": str(models.EfficientNet_B3_Weights.DEFAULT),
+        "images": content_manifest(image_dir, names),
+    }
+    if cache_path.is_file() and names_path.is_file():
+        with names_path.open("r", encoding="utf-8") as stream:
+            if json.load(stream) == manifest:
+                return np.load(cache_path)
     model, transform = _build_efficientnet_b3()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device).eval()
@@ -111,9 +126,8 @@ def _load_or_create_embeddings(df: pl.DataFrame, config: Config, model_dir: Path
             embeddings.append(outputs.cpu().numpy())
 
     result = np.vstack(embeddings).astype(np.float32)
-    np.save(cache_path, result)
-    with names_path.open("w", encoding="utf-8") as f:
-        json.dump(names, f)
+    atomic_save_numpy(cache_path, result)
+    atomic_write_json(names_path, manifest)
     return result
 
 
@@ -123,6 +137,7 @@ def train_efficientnet_ridge_model(
     feature_set: str = "",
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
     if "fish_type" not in df.columns:
         raise ValueError("efficientnet_ridge requires fish_type in the dataframe.")
@@ -135,15 +150,24 @@ def train_efficientnet_ridge_model(
         per_type,
     )
 
-    model_dir = Path("checkpoints") / config.dataset.name
-    model_dir.mkdir(parents=True, exist_ok=True)
+    model_dir = checkpoint_directory(config, checkpoint_dir)
+    cache_dir = Path("checkpoints") / config.dataset.name / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    image_embeddings = _load_or_create_embeddings(df, config, cache_dir)
 
-    image_embeddings = _load_or_create_embeddings(df, config, model_dir)
-    species_lookup = {name: idx for idx, name in enumerate(sorted(df["fish_type"].unique().to_list()))}
-    species_codes = np.asarray([species_lookup[name] for name in df["fish_type"].to_list()], dtype=np.float32)
+    species_lookup = {
+        name: index
+        for index, name in enumerate(sorted(df["fish_type"].unique().to_list()))
+    }
+    species_codes = np.asarray(
+        [species_lookup[name] for name in df["fish_type"].to_list()],
+        dtype=np.float32,
+    )
 
     tabular = df.select(feature_exprs).to_numpy().astype(np.float32)
-    x = np.concatenate([tabular, image_embeddings, species_codes.reshape(-1, 1)], axis=1)
+    x = np.concatenate(
+        [tabular, image_embeddings, species_codes.reshape(-1, 1)], axis=1
+    )
     y = df["length"].to_numpy().astype(np.float32)
     train_mask = df["is_train"].to_numpy().astype(bool)
 
@@ -155,20 +179,22 @@ def train_efficientnet_ridge_model(
         ]
     )
     model = PerSpeciesRegressor(base_model)
-
     print(f"Training {feature_desc} model on {config.dataset.name}...")
     model.fit(x[train_mask], y[train_mask])
     predictions = model.predict(x)
 
-    model_path = model_dir / f"{feature_desc}.joblib"
-    joblib.dump(
+    model_path = model_dir / (checkpoint_stem(feature_desc, df, per_type) + ".joblib")
+    atomic_joblib_dump(
         {
             "model": model,
+            "dataset": config.dataset.name,
             "feature_set": feature_set,
             "depth": depth,
             "per_type": per_type,
+            "feature_names": df.select(feature_exprs).columns,
             "species_lookup": species_lookup,
             "image_backbone": "efficientnet_b3",
+            "image_weights": str(models.EfficientNet_B3_Weights.DEFAULT),
             "image_source": "rotated",
         },
         model_path,

@@ -7,6 +7,12 @@ from tqdm import tqdm
 from ultralytics import YOLO
 from ultralytics.engine.results import Boxes
 
+from src.artifacts import (
+    atomic_write_json,
+    build_signature,
+    cache_matches,
+    write_manifest,
+)
 from src.config import Config
 
 
@@ -28,22 +34,26 @@ class YoloModel:
         if not self.model_initialized:
             self.model = self._get_yolo_model()
             self.model_initialized = True
-
-        results = self.model.predict(image_path, conf=0.8, verbose=False)
-        if not results or len(results[0].boxes) == 0:
+        results = self.model.predict(str(image_path), conf=0.8, verbose=False)
+        if not results:
             return None, None, None
 
         prediction = results[0]
-        if len(torch.unique(prediction.boxes.cls)) != len(prediction.boxes.cls):
+        boxes = prediction.boxes
+        if boxes is None or len(boxes) == 0:
+            return None, None, None
+
+        if len(torch.unique(boxes.cls)) != len(boxes.cls):
             return None, None, None
 
         image_height, image_width = prediction.orig_shape
-
-        return prediction.boxes, image_height, image_width
+        return boxes, image_height, image_width
 
 
 class YoloStep:
-    def __init__(self, config: Config, initial:bool=False):
+    CONFIDENCE = 0.8
+
+    def __init__(self, config: Config, initial: bool = False):
         self.config = config
         rotate = config.dataset.rotate
         if initial:
@@ -60,11 +70,11 @@ class YoloStep:
             / f"yolo_{'rotated' if rotate else 'initial'}"
         )
         self.output_dir.mkdir(exist_ok=True, parents=True)
-
+        self.cache_variant = "rotated" if rotate else "initial"
         self.yolo_model = YoloModel(config.model_path.yolo)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images).drop_nulls()
+        return self._process_images(df)
 
     def _get_xxyywh(self, label: str, box: Boxes):
         x1, y1, x2, y2 = box.xyxy[0].int().tolist()
@@ -79,9 +89,22 @@ class YoloStep:
         }
 
     def _get_yolo_data(self, name: str, image_path: Path, output_path: Path) -> dict:
-        if output_path.exists():
-            with open(output_path, "r") as f:
-                return json.load(f)
+        signature = build_signature(
+            inputs={
+                "image": image_path,
+                "checkpoint": self.config.model_path.yolo,
+            },
+            parameters={
+                "step": "yolo",
+                "version": 1,
+                "variant": self.cache_variant,
+                "confidence": self.CONFIDENCE,
+                "classes": self.config.params.yolo_classes,
+            },
+        )
+        if cache_matches(output_path, signature):
+            with output_path.open("r", encoding="utf-8") as stream:
+                return json.load(stream)
 
         boxes, image_h, image_w = self.yolo_model.predict(image_path)
         if boxes is None:
@@ -96,9 +119,8 @@ class YoloStep:
             label = name_map.get(box.cls.item(), default_item)
             data.update(self._get_xxyywh(label, box))
 
-        with open(output_path, "w") as f:
-            json.dump(data, f)
-
+        atomic_write_json(output_path, data)
+        write_manifest(output_path, signature)
         return data
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -107,16 +129,23 @@ class YoloStep:
         data = []
         for name in tqdm(names, desc="YOLO Object Detection"):
             image_path = self.input_dir / name
-            output_path = self.output_dir / (name + ".json")
-            if not image_path.exists():
+            output_path = self.output_dir / f"{name}.json"
+            if not image_path.is_file():
                 continue
 
             features = self._get_yolo_data(name, image_path, output_path)
-            data.append(features)
+            if features:
+                data.append(features)
 
         cols_to_drop = ["Image_w", "Image_h"]
         for label in self.config.params.yolo_classes:
             for suffix in ["_x1", "_x2", "_y1", "_y2", "_w", "_h"]:
                 cols_to_drop.append(f"{label}{suffix}")
 
-        return df.drop(cols_to_drop, strict=False).join(pl.DataFrame(data), on="name", how="left") if data else df
+        if not data:
+            return df.clear()
+
+        result = df.drop(cols_to_drop, strict=False).join(
+            pl.DataFrame(data), on="name", how="left"
+        )
+        return result.drop_nulls(cols_to_drop)

@@ -35,7 +35,9 @@ def render_explorer(dataset, df_meta, all_image_names):
         if selected_split != "all":
             names_source = names_source.filter(pl.col(f"is_{selected_split}"))
         if selected_fish_types and "fish_type" in names_source.columns:
-            names_source = names_source.filter(pl.col("fish_type").is_in(selected_fish_types))
+            names_source = names_source.filter(
+                pl.col("fish_type").is_in(selected_fish_types)
+            )
         all_image_names = names_source["name"].to_list()
 
     if not all_image_names:

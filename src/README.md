@@ -41,16 +41,16 @@
 - `predictions.csv` is a wide table keyed by image name.
 - Identifier columns include the target, split flags, and optional fish type.
 - Every other column represents one experiment's predicted length.
-- Predictions cover all surviving splits; visualization performs the split filtering and calculates metrics.
+- Predictions cover all surviving splits; training publishes per-split metrics and visualization recalculates metrics for interactive subsets.
 
 ## Shared Runtime Rules
 
 - Run module commands from the repository root because data, config, checkpoint, and third-party paths are relative.
-- Generated artifacts are overwritten or reused in place; there is no run registry or global transaction.
-- Image names are join keys throughout the project and are assumed to be unique.
-- Caches are keyed by filename rather than input hashes or config versions.
+- Preprocessing publishes its final CSV atomically; training artifacts are versioned by run and exposed through a final `current.json` pointer.
+- Image names are validated as unique, safe relative join keys before splitting and preprocessing.
+- Reusable caches carry content and parameter manifests; mismatches trigger recomputation.
 - Data, checkpoints, and runtime caches are ignored by Git and are not portable with the source alone.
-- The pipeline does not automatically remove stale or orphaned outputs.
+- The pipeline reports but does not automatically remove stale or orphaned outputs.
 
 ## Execution Order
 

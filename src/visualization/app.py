@@ -11,6 +11,7 @@ from src.visualization.data_loading import (
 from src.visualization.views import (
     render_explorer,
     render_analysis,
+    render_correlation,
     render_comparison,
     render_fish_type_comparison,
     render_model_fish_type_heatmap,
@@ -35,9 +36,7 @@ def main():
     df_meta, all_image_names = load_dataset_metadata(selected_dataset)
 
     if df_meta is None:
-        st.sidebar.warning(
-            f"Could not load metadata for {selected_dataset}."
-        )
+        st.sidebar.warning(f"Could not load metadata for {selected_dataset}.")
 
     df_pred = load_prediction_df(selected_dataset)
     has_fish_types = bool(get_prediction_fish_types(df_pred))
@@ -45,6 +44,7 @@ def main():
         "Data Explorer",
         "Prediction Visualization",
         "Error Analysis",
+        "Correlation Analysis",
         "Model Comparison",
     ]
     if has_fish_types:
@@ -62,6 +62,8 @@ def main():
         render_prediction_viz(selected_dataset)
     elif mode == "Error Analysis":
         render_analysis(selected_dataset, df_meta, all_image_names)
+    elif mode == "Correlation Analysis":
+        render_correlation(selected_dataset, df_meta)
     elif mode == "Model Comparison":
         render_comparison(selected_dataset)
     elif mode == "Fish Type Comparison":

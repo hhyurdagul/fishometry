@@ -20,7 +20,6 @@ processed.csv, so no preprocessing rerun is needed.
 import json
 from pathlib import Path
 
-import joblib
 import numpy as np
 import polars as pl
 import torch
@@ -32,7 +31,17 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 
+from src.artifacts import (
+    atomic_save_numpy,
+    atomic_write_json,
+    content_manifest,
+)
 from src.config import Config
+from src.training.artifacts import (
+    atomic_joblib_dump,
+    checkpoint_directory,
+    checkpoint_stem,
+)
 from src.training.data_loader import get_feature_names_and_desc
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -40,6 +49,7 @@ IMAGENET_STD = (0.229, 0.224, 0.225)
 ALPHAS = np.logspace(-3, 8, 120)
 MIN_SPECIES_ROWS = 8
 SPECIES_BLEND = 0.85
+DINO_REPOSITORY = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 
 # (hub model, image source, square input size, framing). DINOv2 uses 14px
 # patches, so the sizes are multiples of 14. The rotated views keep the scene
@@ -59,22 +69,71 @@ VIEWS: tuple[tuple[str, str, int, str], ...] = (
 
 EPS = 1e-6
 
-GEOMETRY_COLUMNS = [
-    "g_ht_rel", "g_ht_over_fishdiag", "g_fish_diag_rel", "g_head_frac", "g_tail_frac",
-    "g_head_over_tail", "g_head_aspect", "g_tail_aspect", "g_cx", "g_cy",
-    "g_img_aspect", "g_img_diag", "g_fill", "g_compact", "g_elong", "g_mask_rel",
-    "g_major_rel", "g_depth_contrast", "g_depth_span",
+COORD_GEOMETRY_COLUMNS = [
+    "g_ht_rel",
+    "g_ht_over_fishdiag",
+    "g_fish_diag_rel",
+    "g_head_frac",
+    "g_tail_frac",
+    "g_head_over_tail",
+    "g_head_aspect",
+    "g_tail_aspect",
+    "g_cx",
+    "g_cy",
+    "g_img_aspect",
+    "g_img_diag",
+]
+SHAPE_GEOMETRY_COLUMNS = [
+    "g_fill",
+    "g_compact",
+    "g_elong",
+    "g_mask_rel",
+    "g_major_rel",
+]
+DEPTH_GEOMETRY_COLUMNS = ["g_depth_span"]
+
+COORD_LOG_SOURCES = [
+    "relative_w",
+    "relative_h",
+    "relative_area",
+    "fish_area",
+    "g_ht_rel",
+    "g_fish_diag_rel",
+    "g_head_frac",
+    "g_tail_frac",
+    "g_img_diag",
+]
+SHAPE_LOG_SOURCES = [
+    "g_mask_rel",
+    "g_major_rel",
+    "mask_area",
+    "mask_perimeter",
+    "major_axis",
+    "minor_axis",
 ]
 
-LOG_SOURCES = [
-    "relative_w", "relative_h", "relative_area", "fish_area", "g_ht_rel",
-    "g_fish_diag_rel", "g_head_frac", "g_tail_frac", "g_mask_rel", "g_major_rel",
-    "mask_area", "mask_perimeter", "major_axis", "minor_axis", "g_img_diag",
-]
+
+def get_derived_feature_names(
+    feature_set: str, depth: bool
+) -> tuple[list[str], list[str]]:
+    """Return DINO-only derived features allowed by an experiment label."""
+    if feature_set not in {"coords", "features"}:
+        raise ValueError("DINOv2 supports only `coords` and `features` feature sets")
+
+    columns = list(COORD_GEOMETRY_COLUMNS)
+    log_sources = list(COORD_LOG_SOURCES)
+    if feature_set == "features":
+        columns.extend(SHAPE_GEOMETRY_COLUMNS)
+        log_sources.extend(SHAPE_LOG_SOURCES)
+    if depth:
+        columns.extend(DEPTH_GEOMETRY_COLUMNS)
+    return columns, log_sources
 
 
-def add_derived_features(df: pl.DataFrame) -> pl.DataFrame:
-    """Add scale-free geometry ratios and log sizes derived from existing columns."""
+def add_derived_features(
+    df: pl.DataFrame, feature_set: str, depth: bool
+) -> pl.DataFrame:
+    """Add only derived values permitted by the experiment contract."""
     c = pl.col
     img_diag = (c("Image_w") ** 2 + c("Image_h") ** 2).sqrt()
     head_cx = (c("Head_x1") + c("Head_x2")) / 2
@@ -84,36 +143,47 @@ def add_derived_features(df: pl.DataFrame) -> pl.DataFrame:
     head_tail = ((head_cx - tail_cx) ** 2 + (head_cy - tail_cy) ** 2).sqrt()
     fish_diag = (c("Fish_w") ** 2 + c("Fish_h") ** 2).sqrt()
 
-    df = df.with_columns(
-        # Straight-line head-to-tail pixel span: the direct analogue of the label.
-        g_ht_rel=head_tail / img_diag,
-        g_ht_over_fishdiag=head_tail / (fish_diag + EPS),
-        g_fish_diag_rel=fish_diag / img_diag,
-        # Body proportions, dimensionless and therefore species-descriptive.
-        g_head_frac=(c("Head_w") * c("Head_h")).sqrt() / (fish_diag + EPS),
-        g_tail_frac=(c("Tail_w") * c("Tail_h")).sqrt() / (fish_diag + EPS),
-        g_head_over_tail=(
-            (c("Head_w") * c("Head_h")) / (c("Tail_w") * c("Tail_h") + EPS)
-        ).sqrt(),
-        g_head_aspect=c("Head_w") / (c("Head_h") + EPS),
-        g_tail_aspect=c("Tail_w") / (c("Tail_h") + EPS),
-        # Placement in frame: a weak ground-plane / camera-distance cue.
-        g_cx=((c("Fish_x1") + c("Fish_x2")) / 2) / c("Image_w"),
-        g_cy=((c("Fish_y1") + c("Fish_y2")) / 2) / c("Image_h"),
-        g_img_aspect=c("Image_w") / c("Image_h"),
-        g_img_diag=img_diag,
-        # Segmentation shape descriptors.
-        g_fill=c("mask_area") / (c("Fish_w") * c("Fish_h") + EPS),
-        g_compact=c("mask_perimeter") ** 2 / (c("mask_area") + EPS),
-        g_elong=c("major_axis") / (c("minor_axis") + EPS),
-        g_mask_rel=c("mask_area").sqrt() / img_diag,
-        g_major_rel=c("major_axis") / img_diag,
-        # Relative-depth contrasts between the fish and its surroundings.
-        g_depth_contrast=c("body_depth") - c("background_depth"),
-        g_depth_span=(c("head_depth") - c("tail_depth")).abs(),
+    expressions = [
+        head_tail.truediv(img_diag).alias("g_ht_rel"),
+        head_tail.truediv(fish_diag + EPS).alias("g_ht_over_fishdiag"),
+        fish_diag.truediv(img_diag).alias("g_fish_diag_rel"),
+        ((c("Head_w") * c("Head_h")).sqrt() / (fish_diag + EPS)).alias("g_head_frac"),
+        ((c("Tail_w") * c("Tail_h")).sqrt() / (fish_diag + EPS)).alias("g_tail_frac"),
+        ((c("Head_w") * c("Head_h")) / (c("Tail_w") * c("Tail_h") + EPS))
+        .sqrt()
+        .alias("g_head_over_tail"),
+        (c("Head_w") / (c("Head_h") + EPS)).alias("g_head_aspect"),
+        (c("Tail_w") / (c("Tail_h") + EPS)).alias("g_tail_aspect"),
+        (((c("Fish_x1") + c("Fish_x2")) / 2) / c("Image_w")).alias("g_cx"),
+        (((c("Fish_y1") + c("Fish_y2")) / 2) / c("Image_h")).alias("g_cy"),
+        (c("Image_w") / c("Image_h")).alias("g_img_aspect"),
+        img_diag.alias("g_img_diag"),
+    ]
+    if feature_set == "features":
+        expressions.extend(
+            [
+                (c("mask_area") / (c("Fish_w") * c("Fish_h") + EPS)).alias("g_fill"),
+                (c("mask_perimeter") ** 2 / (c("mask_area") + EPS)).alias("g_compact"),
+                (c("major_axis") / (c("minor_axis") + EPS)).alias("g_elong"),
+                (c("mask_area").sqrt() / img_diag).alias("g_mask_rel"),
+                (c("major_axis") / img_diag).alias("g_major_rel"),
+            ]
+        )
+    if depth:
+        expressions.append(
+            (c("head_depth") - c("tail_depth")).abs().alias("g_depth_span")
+        )
+
+    columns, log_sources = get_derived_feature_names(feature_set, depth)
+    result = df.with_columns(expressions)
+    result = result.with_columns(
+        [
+            (pl.col(column).abs() + EPS).log().alias(f"log_{column}")
+            for column in log_sources
+        ]
     )
-    return df.with_columns(
-        [(pl.col(col).abs() + EPS).log().alias(f"log_{col}") for col in LOG_SOURCES]
+    return result.select(
+        [*df.columns, *columns, *[f"log_{column}" for column in log_sources]]
     )
 
 
@@ -126,11 +196,13 @@ class ShrunkPerSpeciesRidge(BaseEstimator, RegressorMixin):
 
     @staticmethod
     def _pipeline() -> Pipeline:
-        return Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            ("regressor", RidgeCV(alphas=ALPHAS)),
-        ])
+        return Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+                ("regressor", RidgeCV(alphas=ALPHAS)),
+            ]
+        )
 
     def fit(self, x, y):
         codes = x[:, -1].astype(np.int64)
@@ -167,20 +239,25 @@ class _ImageDataset(Dataset):
     def __len__(self) -> int:
         return len(self.names)
 
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        with Image.open(self.image_dir / self.names[idx]) as image:
-            image = image.convert("RGB")
-            if self.framing == "squash":
-                # Keep the whole frame, accept the aspect-ratio distortion.
-                image = image.resize((self.size, self.size), Image.BILINEAR)
+    def __getitem__(self, index: int) -> torch.Tensor:
+        path = self.image_dir / self.names[index]
+        with Image.open(path) as image_file:
+            image = image_file.convert("RGB")
+            if self.framing == "resize":
+                image = image.resize((self.size, self.size), Image.Resampling.BILINEAR)
             else:
-                # Short-side resize then centre crop.
-                w, h = image.size
-                scale = self.size / min(w, h)
-                image = image.resize((max(self.size, round(w * scale)),
-                                      max(self.size, round(h * scale))), Image.BILINEAR)
-                w, h = image.size
-                left, top = (w - self.size) // 2, (h - self.size) // 2
+                width, height = image.size
+                scale = self.size / min(width, height)
+                image = image.resize(
+                    (
+                        max(self.size, round(width * scale)),
+                        max(self.size, round(height * scale)),
+                    ),
+                    Image.Resampling.BILINEAR,
+                )
+                width, height = image.size
+                left = (width - self.size) // 2
+                top = (height - self.size) // 2
                 image = image.crop((left, top, left + self.size, top + self.size))
 
             array = np.asarray(image, dtype=np.float32) / 255.0
@@ -191,7 +268,10 @@ class _ImageDataset(Dataset):
 
 
 def _view_embeddings(
-    names: list[str], processed_dir: Path, model_dir: Path, view: tuple[str, str, int, str]
+    names: list[str],
+    processed_dir: Path,
+    model_dir: Path,
+    view: tuple[str, str, int, str],
 ) -> np.ndarray:
     backbone, source, size, framing = view
     image_dir = processed_dir / source
@@ -201,15 +281,19 @@ def _view_embeddings(
     cache_path = model_dir / f"dino_{tag}.npy"
     names_path = model_dir / f"dino_{tag}_names.json"
 
-    # Only reuse the cache when it was built for this exact ordered name list,
-    # otherwise embeddings would bind to the wrong rows after processed.csv changes.
-    if cache_path.exists() and names_path.exists():
-        with names_path.open("r", encoding="utf-8") as f:
-            if json.load(f) == names:
+    manifest = {
+        "schema": 1,
+        "repository": DINO_REPOSITORY,
+        "view": list(view),
+        "images": content_manifest(image_dir, names),
+    }
+    if cache_path.is_file() and names_path.is_file():
+        with names_path.open("r", encoding="utf-8") as stream:
+            if json.load(stream) == manifest:
                 return np.load(cache_path)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = torch.hub.load("facebookresearch/dinov2", backbone).to(device).eval()
+    model = torch.hub.load(DINO_REPOSITORY, backbone, trust_repo=True).to(device).eval()
     loader = DataLoader(
         _ImageDataset(image_dir, names, size, framing),
         batch_size=4 if size > 336 else 8,
@@ -224,11 +308,9 @@ def _view_embeddings(
     del model
     if device.type == "cuda":
         torch.cuda.empty_cache()
-
     result = np.vstack(chunks).astype(np.float32)
-    np.save(cache_path, result)
-    with names_path.open("w", encoding="utf-8") as f:
-        json.dump(names, f)
+    atomic_save_numpy(cache_path, result)
+    atomic_write_json(names_path, manifest)
     return result
 
 
@@ -238,6 +320,7 @@ def train_dino_ridge_model(
     feature_set: str = "",
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
     if "fish_type" not in df.columns:
         raise ValueError("dino_ridge requires fish_type in the dataframe.")
@@ -246,18 +329,25 @@ def train_dino_ridge_model(
     feature_exprs, feature_desc = get_feature_names_and_desc(
         "dino_ridge", feature_set, depth, per_type
     )
-    # The derived geometry is always supplied; it is cheap and never hurt in testing.
-    df = add_derived_features(df)
-    feature_exprs = list(feature_exprs) + [pl.col(GEOMETRY_COLUMNS + [f"log_{c}" for c in LOG_SOURCES])]
+    derived_columns, log_sources = get_derived_feature_names(feature_set, depth)
+    df = add_derived_features(df, feature_set, depth)
+    feature_exprs = list(feature_exprs) + [
+        pl.col(derived_columns + [f"log_{column}" for column in log_sources])
+    ]
 
-    model_dir = Path("checkpoints") / config.dataset.name
-    model_dir.mkdir(parents=True, exist_ok=True)
+    model_dir = checkpoint_directory(config, checkpoint_dir)
+    cache_dir = Path("checkpoints") / config.dataset.name / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     processed_dir = config.dataset.output_dir
 
     names = df["name"].to_list()
-    embeddings = [_view_embeddings(names, processed_dir, model_dir, v) for v in VIEWS]
+    embeddings = [
+        _view_embeddings(names, processed_dir, cache_dir, view) for view in VIEWS
+    ]
 
-    species_lookup = {n: i for i, n in enumerate(sorted(df["fish_type"].unique().to_list()))}
+    species_lookup = {
+        n: i for i, n in enumerate(sorted(df["fish_type"].unique().to_list()))
+    }
     species_codes = np.asarray(
         [species_lookup[n] for n in df["fish_type"].to_list()], dtype=np.float32
     )
@@ -271,20 +361,27 @@ def train_dino_ridge_model(
     model = ShrunkPerSpeciesRidge().fit(x[train_mask], y[train_mask])
     predictions = model.predict(x)
 
-    joblib.dump(
+    atomic_joblib_dump(
         {
             "model": model,
+            "dataset": config.dataset.name,
             "feature_set": feature_set,
             "depth": depth,
             "per_type": per_type,
+            "feature_names": df.select(feature_exprs).columns,
             "species_lookup": species_lookup,
             "image_backbone": "dinov2_multiview",
             "views": VIEWS,
+            "dino_repository": DINO_REPOSITORY,
+            "derived_features": derived_columns,
+            "log_sources": log_sources,
         },
-        model_dir / f"{feature_desc}.joblib",
+        model_dir / f"{checkpoint_stem(feature_desc, df, per_type)}.joblib",
     )
 
-    return pl.DataFrame({
-        "name": df["name"].to_numpy(),
-        feature_desc: np.round(predictions, 2),
-    })
+    return pl.DataFrame(
+        {
+            "name": df["name"].to_numpy(),
+            feature_desc: np.round(predictions, 2),
+        }
+    )

@@ -1,10 +1,5 @@
 from pathlib import Path
-from pydantic import (
-    BaseModel,
-    computed_field,
-    model_validator,
-    field_validator
-)
+from pydantic import BaseModel, computed_field, model_validator, field_validator
 
 import json
 
@@ -22,7 +17,7 @@ class ParamConfig(BaseModel):
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     test_ratio: float = 0.15
-    yolo_classes: list[str] = ["Head", "Tail", "Fish"] # Last one accepted as default
+    yolo_classes: list[str] = ["Head", "Tail", "Fish"]  # Last one accepted as default
 
     @field_validator("train_ratio", "val_ratio", "test_ratio")
     @classmethod
@@ -111,6 +106,7 @@ def get_valid_configs() -> list[str]:
 
     return sorted(configs)
 
+
 def get_config(config_name: str) -> Config:
     config_path = (CONFIG_ROOT / config_name).with_suffix(".json")
     if not config_path.exists():
@@ -118,6 +114,6 @@ def get_config(config_name: str) -> Config:
     with open(config_path, "r", encoding="utf-8") as f:
         return Config(**json.load(f))
 
+
 if __name__ == "__main__":
     print(get_valid_configs())
-

@@ -99,6 +99,8 @@ class CreateDataAugmentationTests(unittest.TestCase):
         pl.DataFrame(
             {"name": ["one.png", "two.png"], "length": [10.5, 12.0]}
         ).write_csv(raw_path)
+        self._write_image("one.png")
+        self._write_image("two.png", offset=7)
         raw_before = raw_path.read_bytes()
 
         run_pipeline(self.config, augment=False)
@@ -119,6 +121,19 @@ class CreateDataAugmentationTests(unittest.TestCase):
             ).item()
         )
         self.assertEqual(raw_before, raw_path.read_bytes())
+
+    def test_duplicate_image_content_is_rejected_before_splitting(self) -> None:
+        raw_path = self.source_dir / "raw.csv"
+        pl.DataFrame(
+            {"name": ["one.png", "two.png"], "length": [10.5, 12.0]}
+        ).write_csv(raw_path)
+        self._write_image("one.png")
+        (self.source_raw_dir / "two.png").write_bytes(
+            (self.source_raw_dir / "one.png").read_bytes()
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate image content"):
+            run_pipeline(self.config, augment=False)
         self.assertFalse(Path("data/example-zoom").exists())
 
     def test_source_split_target_config_and_unrelated_files_are_preserved(self) -> None:
@@ -264,6 +279,8 @@ class CreateDataAugmentationTests(unittest.TestCase):
                 "is_test": [False, True],
             }
         ).write_csv(self.source_dir / "split.csv")
+        self._write_image("fish.png")
+        self._write_image("fish-zin-39.png", offset=7)
 
         with self.assertRaisesRegex(ValueError, "duplicate image name"):
             run_pipeline(self.config, augment=True)

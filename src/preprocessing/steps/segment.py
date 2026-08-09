@@ -7,6 +7,12 @@ import torch
 from segment_anything import SamPredictor, sam_model_registry
 from tqdm import tqdm
 
+from src.artifacts import (
+    atomic_save_numpy,
+    build_signature,
+    cache_matches,
+    write_manifest,
+)
 from src.config import Config
 from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_coord
 
@@ -58,27 +64,42 @@ class SegmentStep:
         self.segment_model = SegmentModel(config.model_path.sam)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images).drop_nulls()
+        return self._process_images(df)
 
     def _get_segment_mask(
         self, data: dict, image_path: Path, output_path: Path
     ) -> np.ndarray:
-        if output_path.exists():
-            mask = np.load(output_path)
-        else:
-            head_cx, head_cy = get_center_coord(data, "Head")
-            tail_cx, tail_cy = get_center_coord(data, "Tail")
+        head_cx, head_cy = get_center_coord(data, "Head")
+        tail_cx, tail_cy = get_center_coord(data, "Tail")
+        signature = build_signature(
+            inputs={
+                "image": image_path,
+                "checkpoint": self.config.model_path.sam,
+            },
+            parameters={
+                "step": "segment",
+                "version": 1,
+                "model": "vit_l",
+                "positive_points": [
+                    [head_cx, head_cy],
+                    [tail_cx, tail_cy],
+                ],
+            },
+        )
+        if cache_matches(output_path, signature):
+            return np.load(output_path)
 
-            points = np.array([[head_cx, head_cy], [tail_cx, tail_cy]])
-            labels = np.ones(len(points))
+        points = np.array([[head_cx, head_cy], [tail_cx, tail_cy]])
+        labels = np.ones(len(points))
 
-            image = cv2.imread(str(image_path))
-            if image is None:
-                raise ValueError(f"Could not read image: {image_path}")
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"Could not read image: {image_path}")
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-            mask = self.segment_model.get_mask(image, points, labels)
-            np.save(output_path, mask)
+        mask = self.segment_model.get_mask(image, points, labels)
+        atomic_save_numpy(output_path, mask)
+        write_manifest(output_path, signature)
         return mask
 
     def _extract_geometric_features(self, name: str, mask: np.ndarray) -> dict:
@@ -109,8 +130,9 @@ class SegmentStep:
         # Major and Minor Axes
         # cv2.fitEllipse requires at least 5 points to fit an ellipse mathematically
         if len(fish_contour) >= 5:
-            # returns: (center(x, y), (minor_axis, major_axis), angle_of_rotation)
-            _, (minor_axis, major_axis), _ = cv2.fitEllipse(fish_contour)
+            _, axes, _ = cv2.fitEllipse(fish_contour)
+            major_axis = max(axes)
+            minor_axis = min(axes)
         else:
             major_axis, minor_axis = 0, 0
 
@@ -156,4 +178,16 @@ class SegmentStep:
                 print(f"Error segmenting {name}: {e}")
                 continue
 
-        return df.join(pl.DataFrame(data), on="name", how="left") if data else df
+        if not data:
+            return df.clear()
+        feature_columns = [
+            "mask_area",
+            "mask_perimeter",
+            "major_axis",
+            "minor_axis",
+            "solidity",
+        ]
+        result = df.drop(feature_columns, strict=False).join(
+            pl.DataFrame(data), on="name", how="left"
+        )
+        return result.drop_nulls(feature_columns)

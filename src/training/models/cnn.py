@@ -17,7 +17,12 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
-from src.config import Config, get_config
+from src.config import Config
+from src.training.artifacts import (
+    atomic_torch_save,
+    checkpoint_directory,
+    checkpoint_stem,
+)
 from src.training.data_loader import get_feature_names_and_desc
 
 IMAGE_SIZE = 224
@@ -34,6 +39,7 @@ def build_image_transform() -> transforms.Compose:
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ]
     )
+
 
 def get_cnn_feature_spec(
     feature_set: str | None,
@@ -82,8 +88,10 @@ class FishModel(nn.Module):
 
         try:
             self.backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-        except Exception:
-            self.backbone = models.resnet18(weights=None)
+        except Exception as error:
+            raise RuntimeError(
+                "ImageNet ResNet-18 weights are required for the CNN experiment"
+            ) from error
 
         self.backbone.fc = nn.Identity()
         self.fc = nn.Sequential(
@@ -134,18 +142,15 @@ class FishImageDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx):
-        image_path, aux, target, name = self.samples[idx]
-
+    def __getitem__(self, index):
+        image_path, aux, target, name = self.samples[index]
         with Image.open(image_path) as image_file:
             image = image_file.convert("RGB")
-
         if self.transform:
             image = self.transform(image)
-
         return (
             image,
-            torch.tensor(aux, dtype=torch.float32),
+            torch.from_numpy(aux),
             torch.tensor(target, dtype=torch.float32),
             name,
         )
@@ -167,8 +172,12 @@ class CNNRegressor:
         self.model = FishModel(aux_size=aux_size).to(self.device)
         self.aux_scaler: StandardScaler | None = None
 
-    def _build_loader(self, dataset: FishImageDataset, shuffle: bool = False) -> DataLoader:
-        batch_size = min(self.batch_size, len(dataset)) if len(dataset) > 0 else self.batch_size
+    def _build_loader(
+        self, dataset: FishImageDataset, shuffle: bool = False
+    ) -> DataLoader:
+        batch_size = (
+            min(self.batch_size, len(dataset)) if len(dataset) > 0 else self.batch_size
+        )
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
     def fit(self, train_dataset: FishImageDataset, val_dataset: FishImageDataset):
@@ -259,15 +268,16 @@ class CNNRegressor:
 
         return np.asarray(predictions, dtype=np.float32)
 
-    def save(self, path: str):
+    def save(self, path: Path, metadata: dict | None = None) -> None:
         checkpoint = {
             "model_state_dict": self.model.state_dict(),
             "aux_size": self.aux_size,
+            "metadata": metadata or {},
         }
         if self.aux_scaler is not None:
             checkpoint["aux_scaler_mean"] = self.aux_scaler.mean_
             checkpoint["aux_scaler_scale"] = self.aux_scaler.scale_
-        torch.save(checkpoint, path)
+        atomic_torch_save(checkpoint, path)
 
 
 def build_cnn_model(
@@ -303,6 +313,7 @@ def run_cnn_pipeline(
     epochs: int = 100,
     batch_size: int = 16,
     lr: float = 1e-4,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
     feature_exprs, feature_desc = get_cnn_feature_spec(feature_set, depth, per_type)
     image_dir = config.dataset.output_dir / "blackout"
@@ -310,12 +321,9 @@ def run_cnn_pipeline(
         raise FileNotFoundError(f"Blackout image directory not found: {image_dir}")
 
     transform = build_image_transform()
-
     train_df = df.filter(pl.col("is_train"))
     val_df = df.filter(pl.col("is_val"))
 
-    # Fit the auxiliary-feature scaler on training rows only, then reuse it
-    # for the validation and prediction datasets to avoid leakage.
     aux_scaler: StandardScaler | None = None
     train_aux = select_aux_features(train_df, feature_exprs)
     if train_aux.shape[1] > 0:
@@ -330,9 +338,10 @@ def run_cnn_pipeline(
     pred_dataset = build_image_dataset(
         df, image_dir, feature_exprs, transform, aux_scaler
     )
+    if pred_dataset.names != df["name"].to_list():
+        raise ValueError("Every training row must have a readable blackout image")
 
     print(f"Training {feature_desc} model on {config.dataset.name}...")
-
     model = build_cnn_model(
         aux_size=train_dataset.aux_size,
         epochs=epochs,
@@ -341,20 +350,36 @@ def run_cnn_pipeline(
     )
     model.aux_scaler = aux_scaler
     model.fit(train_dataset, val_dataset)
-    pred = model.predict(pred_dataset)
+    predictions = model.predict(pred_dataset)
 
-    model_dir = Path("checkpoints") / config.dataset.name
-    model_dir.mkdir(parents=True, exist_ok=True)
-    model.save(str(model_dir / f"{feature_desc}.pth"))
-
-    pred = pl.DataFrame(
+    model_dir = checkpoint_directory(config, checkpoint_dir)
+    stem = checkpoint_stem(feature_desc, df, per_type)
+    model.save(
+        model_dir / f"{stem}.pth",
         {
-            "name": pred_dataset.names,
-            feature_desc: np.round(pred, 2),
-        }
+            "model": "cnn",
+            "dataset": config.dataset.name,
+            "feature_set": feature_set,
+            "depth": depth,
+            "per_type": per_type,
+            "feature_names": df.select(feature_exprs).columns,
+            "image_size": IMAGE_SIZE,
+            "image_source": "blackout",
+            "backbone": str(models.ResNet18_Weights.DEFAULT),
+            "imagenet_mean": IMAGENET_MEAN,
+            "imagenet_std": IMAGENET_STD,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "learning_rate": lr,
+        },
     )
 
-    return pred
+    return pl.DataFrame(
+        {
+            "name": pred_dataset.names,
+            feature_desc: np.round(predictions, 2),
+        }
+    )
 
 
 def train_cnn_model(
@@ -363,6 +388,7 @@ def train_cnn_model(
     feature_set: str | None,
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
     return run_cnn_pipeline(
         df,
@@ -373,5 +399,5 @@ def train_cnn_model(
         epochs=100,
         batch_size=16,
         lr=1e-4,
+        checkpoint_dir=checkpoint_dir,
     )
-

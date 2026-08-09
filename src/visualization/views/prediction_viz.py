@@ -88,7 +88,9 @@ def render_prediction_viz(dataset):
 
     st.markdown("---")
     st.subheader("Sorted Comparison")
-    sort_option = st.radio("Sort by", ["Percentage Error", "Actual Length"], horizontal=True)
+    sort_option = st.radio(
+        "Sort by", ["Percentage Error", "Actual Length"], horizontal=True
+    )
     sorted_df = pandas_df.sort_values(
         "mape" if sort_option == "Percentage Error" else "gt_length",
         ascending=sort_option != "Percentage Error",

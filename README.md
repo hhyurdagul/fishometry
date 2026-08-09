@@ -44,7 +44,7 @@ Dataset and runtime artifacts are intentionally ignored by Git. Do not assume an
 - The Depth Anything V2 Git submodule
 - YOLO, Segment Anything, and Depth Anything checkpoints referenced by the selected config
 - A CUDA-capable GPU is strongly recommended for preprocessing and neural training, although CPU execution is supported by most stages
-- `.env.json` with a `GEMINI_API_KEY` entry because the context extractor is initialized by preprocessing, including runs that only reuse cached context
+- `.env.json` with a `GEMINI_API_KEY` entry when a configured `features` experiment requires original-image context
 
 From the repository root:
 
@@ -72,7 +72,7 @@ data/<dataset>/
 - `length`: numeric ground-truth fish length, using one consistent unit within the dataset.
 - `fish_type`: required only when the config enables fish-type-aware behavior.
 
-Rows containing null values are removed when data creation begins. A metadata row whose image is missing cannot complete later image-processing stages.
+Required metadata values are validated before splitting. Names must be safe, unique relative paths; every referenced image must exist, decode successfully, and have unique file content.
 
 ## End-to-End Workflow
 
@@ -103,7 +103,7 @@ uv run python -m src.preprocessing.run --dataset-name data-inside-zoom
 uv run python -m src.preprocessing.run --dataset-name data-outside
 ```
 
-Preprocessing always executes its complete stage list. Configured feature sets and depth flags control the later training matrix; they do not disable preprocessing stages.
+Preprocessing runs only the expensive optional stages required by the experiment contract: depth is skipped when every configured depth flag is false, and original-image context is skipped when `features` is absent. Detection, rotation, segmentation, blackout generation, and final feature engineering remain required by the core model matrix.
 
 ### 4. Train experiments
 
@@ -113,7 +113,7 @@ uv run python -m src.training.run --dataset-name data-inside-zoom
 uv run python -m src.training.run --dataset-name data-outside
 ```
 
-Training overwrites model checkpoints with the same experiment names and replaces the final prediction table only after orchestration completes.
+Training writes checkpoints, predictions, metrics, and a content manifest into an immutable run directory. Canonical predictions and reports, followed by `checkpoints/<dataset>/current.json`, are replaced only after the full matrix succeeds.
 
 ### 5. Explore results
 
@@ -137,17 +137,19 @@ Each dataset is stored under `data/<dataset>/`.
 | `processed/depth/` | Preprocessing | Cached relative-depth arrays |
 | `processed/segment/` | Preprocessing | Cached binary segmentation masks |
 | `processed/blackout/` | Preprocessing | Isolated fish images centered on a 224 by 224 black canvas |
-| `processed.csv` | Preprocessing | Labels, split flags, detections, depth values, mask geometry, context, and engineered features |
-| `checkpoints/<dataset>/` | Training | Saved tabular, neural, convolutional, and embedding regressors plus embedding caches |
-| `predictions.csv` | Training | Identifiers, labels, split flags, and one prediction column per completed experiment |
+| `processed.csv` | Preprocessing | Labels, split flags, detections, requested depth/context values, mask geometry, and engineered features |
+| `processed/preprocessing_report.json` | Preprocessing | Per-stage input, output, and dropped-name attrition |
+| `checkpoints/<dataset>/runs/<run-id>/` | Training | Versioned model checkpoints and a content-hashed run manifest |
+| `checkpoints/<dataset>/cache/` | Training | Content-validated image embedding caches |
+| `predictions.csv` | Training | Atomically published identifiers, labels, split flags, and one prediction column per completed experiment |
 
 Processed and prediction row counts can be smaller than split row counts. Detection, missing-image, depth, segmentation, context, or null-feature failures remove records at several handoffs.
 
 ## Cache and Rerun Policy
 
-Preprocessing caches are keyed by image filename and are reused when present. They do not record the source image hash, checkpoint identity, config, or preprocessing version. Existing rotations, detections, depth maps, masks, blackout images, context responses, and embeddings may therefore be stale after input or model changes.
+Every reusable preprocessing and embedding artifact has a sidecar or companion manifest covering ordered image identities and content hashes plus relevant checkpoint, parameter, prompt, model-revision, and feature-schema values. A mismatch recomputes the artifact instead of silently reusing it.
 
-There is no built-in force or clean mode. Remove only the relevant generated artifacts before a deliberate recomputation, and keep the split manifest stable when comparing experiments. Augmentation and preprocessing do not prune orphaned files left by older runs.
+There is no force or clean mode. Orphaned artifacts from older inputs are reported or left in place rather than pruned automatically; immutable training run directories preserve complete historical fits. Keep the persisted split stable when comparing experiments.
 
 ## Result Interpretation
 
@@ -155,7 +157,7 @@ There is no built-in force or clean mode. Remove only the relevant generated art
 - Validation rows guide selected tree and neural models.
 - Test rows are held out from fitting and model selection.
 - Predictions are generated for all surviving rows, which lets the app display any split.
-- MAE, MAPE, and R2 are calculated by the visualization layer rather than during training.
+- Training writes MAE, MAPE, RMSE, and R² for train, validation, and test; the visualization layer recalculates metrics for interactive subsets.
 - Outdoor results can be compared globally, by fish type, and across global versus per-type estimators.
 
 See [the knowledge base](KNOWLEDGE_BASE.md) for the research rationale and a code-independent description of every stage.

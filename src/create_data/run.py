@@ -2,10 +2,12 @@
 
 import json
 
+import cv2
 import polars as pl
 import typer
 from pydantic import TypeAdapter
 
+from src.artifacts import file_sha256
 from src.config import (
     CONFIG_ROOT,
     Config,
@@ -14,12 +16,76 @@ from src.config import (
     ParamConfig,
     get_config,
 )
-from src.create_data.steps.split import SplitStep
 from src.create_data.steps.augment import AugmentStep, resolve_image_path
+from src.create_data.steps.split import SplitStep
 
 app = typer.Typer(add_completion=False, help="Run the data creation pipeline.")
 
 SPLIT_COLUMNS = ("is_train", "is_val", "is_test")
+
+
+def _validate_source_data(df: pl.DataFrame, config: Config) -> None:
+    required_columns = {"name", "length"}
+    if config.dataset.fish_type_available:
+        required_columns.add("fish_type")
+
+    missing_columns = sorted(required_columns.difference(df.columns))
+    if missing_columns:
+        raise ValueError(
+            "Source metadata is missing required columns: " + ", ".join(missing_columns)
+        )
+
+    null_columns = sorted(
+        column for column in required_columns if df[column].null_count() > 0
+    )
+    if null_columns:
+        raise ValueError(
+            "Source metadata contains null required values in: "
+            + ", ".join(null_columns)
+        )
+
+    if df["name"].n_unique() != df.height:
+        raise ValueError("Source image names must be unique")
+
+    try:
+        lengths = df["length"].cast(pl.Float64, strict=True)
+    except Exception as error:
+        raise ValueError("Source lengths must be numeric") from error
+    if lengths.is_nan().any() or lengths.is_infinite().any():
+        raise ValueError("Source lengths must be finite")
+    if (lengths <= 0).any():
+        raise ValueError("Source lengths must be greater than zero")
+
+    missing_images = []
+    unreadable_images = []
+    content_names: dict[str, list[str]] = {}
+    for name in df["name"].to_list():
+        image_path = resolve_image_path(config.dataset.input_dir, name)
+        if not image_path.is_file():
+            missing_images.append(name)
+            continue
+        if cv2.imread(str(image_path)) is None:
+            unreadable_images.append(name)
+            continue
+        content_names.setdefault(file_sha256(image_path), []).append(name)
+
+    if missing_images:
+        raise ValueError(
+            "Source metadata references missing images: "
+            + ", ".join(sorted(missing_images))
+        )
+    if unreadable_images:
+        raise ValueError(
+            "Source metadata references unreadable images: "
+            + ", ".join(sorted(unreadable_images))
+        )
+
+    duplicate_groups = [names for names in content_names.values() if len(names) > 1]
+    if duplicate_groups:
+        rendered = "; ".join(", ".join(sorted(names)) for names in duplicate_groups)
+        raise ValueError(
+            "Source contains duplicate image content under different names: " + rendered
+        )
 
 
 def _validate_source_split(df: pl.DataFrame, config: Config) -> None:
@@ -41,12 +107,6 @@ def _validate_source_split(df: pl.DataFrame, config: Config) -> None:
             "Source split contains null required values in: " + ", ".join(null_columns)
         )
 
-    if df["name"].n_unique() != df.height:
-        raise ValueError("Source split image names must be unique")
-
-    for name in df["name"].to_list():
-        resolve_image_path(config.dataset.input_dir, name)
-
     non_boolean_columns = [
         column for column in SPLIT_COLUMNS if df.schema[column] != pl.Boolean
     ]
@@ -64,6 +124,8 @@ def _validate_source_split(df: pl.DataFrame, config: Config) -> None:
         raise ValueError(
             "Every source row must belong to exactly one of train, validation, or test"
         )
+
+    _validate_source_data(df, config)
 
 
 def _load_augmentation_config(source_config: Config) -> Config:
@@ -135,7 +197,8 @@ def run_pipeline(config: Config, augment: bool) -> None:
         print(f"Saved processed data to {target_config.dataset.split_csv_path}")
         return
 
-    df = pl.read_csv(config.dataset.input_csv_path).drop_nulls()
+    df = pl.read_csv(config.dataset.input_csv_path)
+    _validate_source_data(df, config)
     step = SplitStep(config)
     print(f"Running {step.__class__.__name__}...")
     df, config = step.process(df)

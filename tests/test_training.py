@@ -1,6 +1,9 @@
+import json
+import os
 import tempfile
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import cv2
@@ -8,9 +11,11 @@ import numpy as np
 import polars as pl
 import torch
 from sklearn.preprocessing import StandardScaler
-
+from src.artifacts import content_manifest
+from src.training.artifacts import checkpoint_stem
 import src.training.models.embedding as embedding
-from src.training.models.cnn import build_image_dataset
+import src.training.run as training_run
+from src.training.models.cnn import FishModel, build_image_dataset
 from src.training.models.regression import (
     MLPRegressor,
     build_xgboost_model,
@@ -20,6 +25,7 @@ from src.training.run import (
     MIN_PER_TYPE_TRAIN_ROWS,
     run_per_fish_task,
     seed_everything,
+    validate_training_frame,
 )
 
 
@@ -114,9 +120,7 @@ class CNNAuxScalerTests(unittest.TestCase):
             )
 
             stored_aux = np.array([sample[1] for sample in dataset.samples])
-        np.testing.assert_allclose(
-            stored_aux, scaler.transform(raw_aux), rtol=1e-5
-        )
+        np.testing.assert_allclose(stored_aux, scaler.transform(raw_aux), rtol=1e-5)
 
 
 class PerFishGuardTests(unittest.TestCase):
@@ -140,11 +144,82 @@ class PerFishGuardTests(unittest.TestCase):
             return data.select("name").with_columns(pl.lit(1.0).alias("pred"))
 
         pred_df = df.select("name")
-        run_per_fish_task(fake_task, df, config=None, feature_set="coords",
-                          depth=False, pred_df=pred_df)
+        run_per_fish_task(
+            fake_task,
+            df,
+            config=None,
+            feature_set="coords",
+            depth=False,
+            pred_df=pred_df,
+        )
 
         self.assertIn("Big", seen)
         self.assertNotIn("Tiny", seen)
+
+    def test_per_type_checkpoint_names_include_species(self) -> None:
+        salmon = pl.DataFrame({"fish_type": ["Atlantic Salmon"]})
+        perch = pl.DataFrame({"fish_type": ["Perch"]})
+        self.assertEqual(
+            checkpoint_stem("linear_coords_per_type", salmon, True),
+            "linear_coords_per_type__atlantic-salmon",
+        )
+        self.assertEqual(
+            checkpoint_stem("linear_coords_per_type", perch, True),
+            "linear_coords_per_type__perch",
+        )
+
+
+class TrainingFrameValidationTests(unittest.TestCase):
+    def _frame(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "name": ["train", "val", "test"],
+                "length": [10.0, 11.0, 12.0],
+                "is_train": [True, False, False],
+                "is_val": [False, True, False],
+                "is_test": [False, False, True],
+                "relative_w": [0.5, 0.6, 0.7],
+                "relative_h": [0.2, 0.3, 0.4],
+                "relative_area": [0.1, 0.2, 0.3],
+                "fish_aspect": [2.5, 2.0, 1.75],
+                "fish_area": [5.0, 6.0, 7.0],
+                "unused_nullable": [None, "kept", None],
+            }
+        )
+
+    def _config(self):
+        return types.SimpleNamespace(
+            dataset=types.SimpleNamespace(
+                fish_type_available=False,
+                feature_sets=["coords"],
+                depth=[False],
+            )
+        )
+
+    def test_unselected_nullable_column_does_not_remove_rows(self) -> None:
+        validate_training_frame(self._frame(), self._config())
+
+    def test_selected_nullable_column_fails_before_training(self) -> None:
+        frame = self._frame().with_columns(
+            pl.when(pl.col("name") == "val")
+            .then(None)
+            .otherwise(pl.col("relative_w"))
+            .alias("relative_w")
+        )
+        with self.assertRaisesRegex(ValueError, "relative_w"):
+            validate_training_frame(frame, self._config())
+
+
+class CNNWeightContractTests(unittest.TestCase):
+    def test_pretrained_weight_failure_is_not_silently_randomized(self) -> None:
+        with mock.patch(
+            "src.training.models.cnn.models.resnet18",
+            side_effect=OSError("offline"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "ImageNet ResNet-18 weights are required"
+            ):
+                FishModel()
 
 
 class EmbeddingCacheTests(unittest.TestCase):
@@ -161,10 +236,18 @@ class EmbeddingCacheTests(unittest.TestCase):
             model_dir.mkdir()
 
             names = ["x.png", "y.png"]
+            for name in names:
+                (root / "rotated" / name).write_bytes(name.encode())
             cached = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
             np.save(model_dir / "efficientnet_b3_rotated_embeddings.npy", cached)
+            manifest = {
+                "schema": 1,
+                "backbone": "efficientnet_b3",
+                "weights": str(embedding.models.EfficientNet_B3_Weights.DEFAULT),
+                "images": content_manifest(root / "rotated", names),
+            }
             (model_dir / "efficientnet_b3_rotated_embeddings_names.json").write_text(
-                '["x.png", "y.png"]', encoding="utf-8"
+                json.dumps(manifest), encoding="utf-8"
             )
 
             df = pl.DataFrame({"name": names})
@@ -198,6 +281,8 @@ class EmbeddingCacheTests(unittest.TestCase):
             )
 
             df = pl.DataFrame({"name": ["new1.png", "new2.png"]})
+            for name in df["name"].to_list():
+                (root / "rotated" / name).write_bytes(name.encode())
             original = embedding._build_efficientnet_b3
             embedding._build_efficientnet_b3 = lambda: (_ for _ in ()).throw(
                 RuntimeError("rebuild attempted")
@@ -206,6 +291,44 @@ class EmbeddingCacheTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "rebuild attempted"):
                     embedding._load_or_create_embeddings(
                         df, self._fake_config(root), model_dir
+                    )
+            finally:
+                embedding._build_efficientnet_b3 = original
+
+    def test_cache_invalidated_when_image_content_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image_dir = root / "rotated"
+            image_dir.mkdir()
+            model_dir = root / "checkpoints"
+            model_dir.mkdir()
+            names = ["x.png"]
+            image = image_dir / names[0]
+            image.write_bytes(b"old")
+            np.save(
+                model_dir / "efficientnet_b3_rotated_embeddings.npy",
+                np.zeros((1, 2), dtype=np.float32),
+            )
+            manifest = {
+                "schema": 1,
+                "backbone": "efficientnet_b3",
+                "weights": str(embedding.models.EfficientNet_B3_Weights.DEFAULT),
+                "images": content_manifest(image_dir, names),
+            }
+            (model_dir / "efficientnet_b3_rotated_embeddings_names.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            image.write_bytes(b"new-content")
+            original = embedding._build_efficientnet_b3
+            embedding._build_efficientnet_b3 = lambda: (_ for _ in ()).throw(
+                RuntimeError("rebuild attempted")
+            )
+            try:
+                with self.assertRaisesRegex(RuntimeError, "rebuild attempted"):
+                    embedding._load_or_create_embeddings(
+                        pl.DataFrame({"name": names}),
+                        self._fake_config(root),
+                        model_dir,
                     )
             finally:
                 embedding._build_efficientnet_b3 = original
@@ -229,9 +352,7 @@ class PredictionAlignmentTests(unittest.TestCase):
                 "is_val": [i % 4 == 0 for i in range(n)],
             }
         )
-        config = types.SimpleNamespace(
-            dataset=types.SimpleNamespace(name="unit-test")
-        )
+        config = types.SimpleNamespace(dataset=types.SimpleNamespace(name="unit-test"))
 
         with tempfile.TemporaryDirectory() as tmp:
             import os
@@ -245,6 +366,121 @@ class PredictionAlignmentTests(unittest.TestCase):
 
         self.assertEqual(pred["name"].to_list(), df["name"].to_list())
         self.assertEqual(pred.height, n)
+
+
+class AtomicTrainingPublicationTests(unittest.TestCase):
+    def _config(self, root: Path):
+        dataset_dir = root / "data" / "unit"
+        dataset_dir.mkdir(parents=True)
+        processed_path = dataset_dir / "processed.csv"
+        pl.DataFrame(
+            {
+                "name": ["train", "val", "test"],
+                "length": [10.0, 11.0, 12.0],
+                "is_train": [True, False, False],
+                "is_val": [False, True, False],
+                "is_test": [False, False, True],
+                "relative_w": [0.5, 0.6, 0.7],
+                "relative_h": [0.2, 0.3, 0.4],
+                "relative_area": [0.1, 0.2, 0.3],
+                "fish_aspect": [2.5, 2.0, 1.75],
+                "fish_area": [5.0, 6.0, 7.0],
+            }
+        ).write_csv(processed_path)
+        dataset = types.SimpleNamespace(
+            name="unit",
+            dataset_dir=dataset_dir,
+            output_csv_path=processed_path,
+            fish_type_available=False,
+            feature_sets=["coords"],
+            depth=[False],
+        )
+        config = types.SimpleNamespace(dataset=dataset)
+        config.model_dump = lambda mode: {"dataset": {"name": "unit"}}
+        return config
+
+    @staticmethod
+    def _task(label: str):
+        def run(
+            df,
+            config,
+            feature_set,
+            depth,
+            per_type,
+            checkpoint_dir,
+        ):
+            (checkpoint_dir / f"{label}.joblib").write_text(label, encoding="utf-8")
+            return df.select("name").with_columns(pl.lit(10.0).alias(label))
+
+        return run
+
+    def test_success_publishes_manifest_predictions_and_reports_together(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._config(root)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    mock.patch.object(training_run, "get_config", return_value=config),
+                    mock.patch.object(
+                        training_run,
+                        "train_linear_model",
+                        self._task("linear"),
+                    ),
+                    mock.patch.object(
+                        training_run,
+                        "train_xgboost_model",
+                        self._task("xgboost"),
+                    ),
+                    mock.patch.object(
+                        training_run, "train_mlp_model", self._task("mlp")
+                    ),
+                    mock.patch.object(
+                        training_run, "train_cnn_model", self._task("cnn")
+                    ),
+                ):
+                    training_run.main(dataset_name="unit")
+            finally:
+                os.chdir(original_cwd)
+
+            current = json.loads(
+                (root / "checkpoints/unit/current.json").read_text(encoding="utf-8")
+            )
+            run_id = current["run_id"]
+            self.assertTrue(
+                (root / f"checkpoints/unit/runs/{run_id}/manifest.json").is_file()
+            )
+            self.assertTrue((root / "data/unit/predictions.csv").is_file())
+            for split in ("train", "val", "test"):
+                self.assertTrue((root / f"reports/unit/{split}.csv").is_file())
+
+    def test_failed_run_does_not_replace_current_predictions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._config(root)
+            canonical = root / "data/unit/predictions.csv"
+            canonical.write_bytes(b"previous-run")
+
+            def fail(*args, **kwargs):
+                raise RuntimeError("training failed")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    mock.patch.object(training_run, "get_config", return_value=config),
+                    mock.patch.object(training_run, "train_linear_model", fail),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "training failed"):
+                        training_run.main(dataset_name="unit")
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertEqual(canonical.read_bytes(), b"previous-run")
+            self.assertFalse((root / "checkpoints/unit/current.json").exists())
 
 
 if __name__ == "__main__":

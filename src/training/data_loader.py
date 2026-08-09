@@ -34,21 +34,13 @@ def get_feature_names_and_desc(
 
     # Base Features
     if feature_set == "coords":
-        features.append(
-            pl.col(
-                coords
-            )
-        )
+        features.append(pl.col(coords))
 
     elif feature_set == "eye":
         features.append(pl.col(["Eye_w", "Eye_h", "Fish_w", "Fish_h"]))
 
     elif feature_set == "features":
-        features.append(
-            pl.col(
-                coords
-            )
-        )
+        features.append(pl.col(coords))
         features.append(
             pl.col(
                 [

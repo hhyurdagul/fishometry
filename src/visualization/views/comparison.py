@@ -79,7 +79,9 @@ def render_comparison(dataset):
     st.dataframe(df_res, width="stretch", hide_index=True)
 
     st.subheader("Visualization")
-    chart_metric = st.radio("Metric to Visualize", ["MAPE (%)", "MAE", "R2"], horizontal=True)
+    chart_metric = st.radio(
+        "Metric to Visualize", ["MAPE (%)", "MAE", "R2"], horizontal=True
+    )
     chart = (
         alt.Chart(df_res.to_pandas())
         .mark_bar()
@@ -156,7 +158,9 @@ def render_fish_type_comparison(dataset):
     st.subheader("Metrics by Fish Type")
     st.dataframe(df_res, width="stretch", hide_index=True)
 
-    chart_metric = st.radio("Metric to Visualize", ["MAPE (%)", "MAE", "R2"], horizontal=True)
+    chart_metric = st.radio(
+        "Metric to Visualize", ["MAPE (%)", "MAE", "R2"], horizontal=True
+    )
     chart_df = df_res.filter(pl.col("Fish Type") != "All").to_pandas()
     chart = (
         alt.Chart(chart_df)
@@ -200,7 +204,9 @@ def render_model_fish_type_heatmap(dataset):
     heatmap_data = []
     for model in selected_models:
         for fish_type in fish_types:
-            df = normalize_predictions(df_pred, [model], split=split, fish_types=[fish_type])
+            df = normalize_predictions(
+                df_pred, [model], split=split, fish_types=[fish_type]
+            )
             metrics = calculate_metrics(df)
             if metrics:
                 heatmap_data.append(

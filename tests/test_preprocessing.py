@@ -3,11 +3,13 @@ import math
 import tempfile
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import cv2
 import numpy as np
 import polars as pl
+from src.artifacts import build_signature, write_manifest
 
 from src.preprocessing.steps.blackout import BlackoutStep
 from src.preprocessing.steps.depth import DepthStep
@@ -15,8 +17,9 @@ from src.preprocessing.steps.feature import FeatureStep
 from src.preprocessing.steps.rotate import RotateStep
 from src.preprocessing.steps.segment import SegmentStep
 from src.preprocessing.steps.utils import get_center_coord
-from src.preprocessing.steps.vlm import VLMStep
+from src.preprocessing.steps.vlm import MODEL_NAME, VLM_FEATURE_COLUMNS, VLMStep
 from src.preprocessing.steps.yolo import YoloStep
+from src.preprocessing.run import run_pipeline as run_preprocessing_pipeline
 
 
 def _dataset_config(root: Path, rotate: bool = True, fish_type: bool = False):
@@ -34,9 +37,18 @@ def _coords_row(name: str) -> dict:
     # Head on the right, tail on the left, fish spanning the middle.
     return {
         "name": name,
-        "Head_x1": 70, "Head_x2": 90, "Head_y1": 45, "Head_y2": 55,
-        "Fish_x1": 20, "Fish_x2": 90, "Fish_y1": 40, "Fish_y2": 60,
-        "Tail_x1": 10, "Tail_x2": 30, "Tail_y1": 45, "Tail_y2": 55,
+        "Head_x1": 70,
+        "Head_x2": 90,
+        "Head_y1": 45,
+        "Head_y2": 55,
+        "Fish_x1": 20,
+        "Fish_x2": 90,
+        "Fish_y1": 40,
+        "Fish_y2": 60,
+        "Tail_x1": 10,
+        "Tail_x2": 30,
+        "Tail_y1": 45,
+        "Tail_y2": 55,
     }
 
 
@@ -194,7 +206,7 @@ class DepthMetricTests(unittest.TestCase):
     def test_extract_metrics_gradient(self) -> None:
         step = DepthStep.__new__(DepthStep)
         depth = np.zeros((100, 100), dtype=np.float32)
-        depth[:, :50] = 5.0   # tail side
+        depth[:, :50] = 5.0  # tail side
         depth[:, 50:] = 20.0  # head side
         metrics = step._extract_metrics(_coords_row("x") | {"name": "x"}, depth)
         self.assertEqual(metrics["head_depth"], 20.0)
@@ -219,23 +231,103 @@ class SegmentFeatureTests(unittest.TestCase):
 
 
 class CachedReadTests(unittest.TestCase):
-    def test_yolo_returns_cached_json(self) -> None:
+    def test_yolo_returns_matching_cached_json(self) -> None:
         step = YoloStep.__new__(YoloStep)
         with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "a.json"
+            root = Path(tmp)
+            image = root / "image.png"
+            checkpoint = root / "yolo.pt"
+            image.write_bytes(b"image")
+            checkpoint.write_bytes(b"checkpoint")
+            step.config = types.SimpleNamespace(
+                model_path=types.SimpleNamespace(yolo=checkpoint),
+                params=types.SimpleNamespace(yolo_classes=["Fish"]),
+            )
+            step.cache_variant = "initial"
+            out = root / "a.json"
             payload = {"name": "a", "Fish_w": 10}
             out.write_text(json.dumps(payload), encoding="utf-8")
-            result = step._get_yolo_data("a", Path("unused.png"), out)
+            signature = build_signature(
+                inputs={"image": image, "checkpoint": checkpoint},
+                parameters={
+                    "step": "yolo",
+                    "version": 1,
+                    "variant": "initial",
+                    "confidence": step.CONFIDENCE,
+                    "classes": ["Fish"],
+                },
+            )
+            write_manifest(out, signature)
+            result = step._get_yolo_data("a", image, out)
             self.assertEqual(result, payload)
 
-    def test_vlm_returns_cached_json(self) -> None:
+    def test_vlm_returns_matching_cached_json(self) -> None:
         step = VLMStep.__new__(VLMStep)
         with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp) / "a.json"
+            root = Path(tmp)
+            image = root / "image.png"
+            image.write_bytes(b"image")
+            out = root / "a.json"
             payload = {"name": "a", "background_depth": "far"}
             out.write_text(json.dumps(payload), encoding="utf-8")
-            result = step._get_features("a", Path("unused.png"), out)
+            signature = build_signature(
+                inputs={"image": image},
+                parameters={
+                    "step": "vlm",
+                    "version": 1,
+                    "model": MODEL_NAME,
+                    "feature_columns": VLM_FEATURE_COLUMNS,
+                },
+            )
+            write_manifest(out, signature)
+            result = step._get_features("a", image, out)
             self.assertEqual(result, payload)
+
+
+class PreprocessingReportTests(unittest.TestCase):
+    def test_pipeline_reports_exact_stage_attrition(self) -> None:
+        class DropOne:
+            def process(self, df: pl.DataFrame) -> pl.DataFrame:
+                return df.filter(pl.col("name") != "drop.png")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            split_path = root / "split.csv"
+            output_dir = root / "processed"
+            output_csv = root / "processed.csv"
+            pl.DataFrame(
+                {
+                    "name": ["keep.png", "drop.png", "test.png"],
+                    "length": [10.0, 11.0, 12.0],
+                    "is_train": [True, False, False],
+                    "is_val": [False, True, False],
+                    "is_test": [False, False, True],
+                    "unrelated_nullable": [None, "value", None],
+                }
+            ).write_csv(split_path)
+            config = types.SimpleNamespace(
+                dataset=types.SimpleNamespace(
+                    name="unit",
+                    split_csv_path=split_path,
+                    output_dir=output_dir,
+                    output_csv_path=output_csv,
+                    fish_type_available=False,
+                )
+            )
+            with mock.patch(
+                "src.preprocessing.run._pipeline_steps",
+                return_value=[DropOne()],
+            ):
+                run_preprocessing_pipeline(config)
+
+            result = pl.read_csv(output_csv)
+            report = json.loads(
+                (output_dir / "preprocessing_report.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(result["name"].to_list(), ["keep.png", "test.png"])
+            self.assertIn("unrelated_nullable", result.columns)
+            self.assertEqual(report["stages"][0]["dropped_names"], ["drop.png"])
+            self.assertEqual(report["stages"][0]["dropped_count"], 1)
 
 
 if __name__ == "__main__":

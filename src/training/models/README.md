@@ -1,8 +1,8 @@
 # Training Models
 
-This package implements the estimators used by the [training orchestrator](../README.md). The normal entry point supplies a complete-case processed dataframe, a dataset configuration, one feature-set name, one depth setting, and a flag used to name per-fish-type results.
+This package implements the estimators used by the [training orchestrator](../README.md). The normal entry point supplies a validated processed dataframe, a dataset configuration, one feature-set name, one depth setting, a per-type flag, and the immutable run's checkpoint directory.
 
-Each training function returns predictions keyed by image `name`. The orchestrator joins those results into the dataset's wide `predictions.csv`; the model functions do not calculate evaluation metrics.
+Each training function returns predictions keyed by image `name`. The orchestrator joins those results into the dataset's wide `predictions.csv`; evaluation metrics are calculated after the full matrix is assembled.
 
 ## Shared Tabular Feature Specification
 
@@ -11,7 +11,7 @@ Linear regression, XGBoost, MLP, CNN auxiliary inputs, and EfficientNet/Ridge al
 1. Include every `fish_type_` one-hot column that exists.
 2. Add the requested base feature group.
 3. Append the five depth columns when depth is enabled.
-4. Build the prediction/checkpoint name from the model, feature set, optional `_depth`, and optional `_per_type` suffix.
+4. Build the prediction name from the model, feature set, optional `_depth`, and optional `_per_type` suffix; per-type checkpoint filenames additionally append the normalized fish type.
 
 The supported groups are:
 
@@ -19,12 +19,12 @@ The supported groups are:
 | --- | --- |
 | `eye` | `Eye_w`, `Eye_h`, `Fish_w`, `Fish_h` |
 | `coords` | `relative_w`, `relative_h`, `relative_area`, `fish_aspect`, `fish_area` |
-| `features` | All `coords` inputs; `mask_area`, `mask_perimeter`, `major_axis`, `minor_axis`, `solidity`; `background_depth`, `has_other_objects`, `is_in_fishnet`; and all columns beginning with `fish_placement_`, `fish_orientation_`, and `lightning_condition_` |
+| `features` | All `coords` inputs; `mask_area`, `mask_perimeter`, `major_axis`, `minor_axis`, `solidity`; `background_depth`, `has_other_objects`, `is_in_fishnet`; and all columns beginning with `fish_placement_`, `fish_orientation_`, and `lighting_condition_` |
 | Depth addition | `head_depth`, `body_depth`, `tail_depth`, `depth_gradient_raw`, `depth_gradient_abs` |
 
 An unrecognized group does not raise a feature-specific error. It selects only matching fish-type one-hot columns, if any, which may create a zero-column matrix or an unintended fish-type-only experiment.
 
-The `per_type` argument does not itself split data. The orchestrator filters to one fish type before calling a core model, and the argument only adds the `_per_type` suffix. Direct callers must perform that filtering themselves.
+The `per_type` argument does not itself split data. The orchestrator filters to one fish type before calling a core model; the flag adds `_per_type` to the prediction name and the filtered fish type to the checkpoint filename. Direct callers must perform that filtering themselves.
 
 ## Mean Baseline
 
@@ -44,22 +44,20 @@ The linear model is scikit-learn ordinary least squares with its default interce
 - It fits selected, unscaled feature values from `is_train` rows.
 - It does not use validation rows, regularization, imputation, or feature scaling.
 - It predicts all rows in the dataframe.
-- The serialized scikit-learn pipeline is saved as `<experiment-name>.joblib`.
-
-The pipeline contains only the regressor; the feature names and ordering are not stored as an explicit preprocessing schema.
+- The fitted model and explicit experiment metadata, including feature names and ordering, are saved as `<experiment-name>.joblib` in the immutable run directory.
 
 ## XGBoost Regression
 
 The tree model uses `XGBRegressor` with:
 
 - at most 100 estimators;
-- maximum tree depth 16;
+- maximum tree depth 4;
 - learning rate 0.1;
 - `random_state=42`;
 - all available CPU worker threads;
 - early stopping after 20 validation rounds without improvement.
 
-Training features are taken from `is_train` rows. The complete `is_val` matrix and targets are supplied as the evaluation set. Inputs are not imputed or scaled. The fitted scikit-learn/XGBoost pipeline is saved as `<experiment-name>.joblib`, then used to predict all rows.
+Training features are taken from `is_train` rows. The complete `is_val` matrix and targets are supplied as the evaluation set. Inputs are not imputed or scaled. The fitted pipeline and explicit feature metadata are saved together, then used to predict all rows.
 
 The validation split must be present and compatible with the training feature matrix. The test split is not supplied to fitting or early stopping.
 
@@ -80,16 +78,9 @@ Its fixed training settings are:
 - shuffled training batches;
 - CUDA when available, otherwise CPU.
 
-Input features are converted directly to `float32` without imputation or scaling. Validation loss is calculated after every epoch, and an independent copy of the lowest-validation-loss state is restored after all 100 epochs. There is no patience-based early stop for the MLP.
+Numerical inputs are converted to `float32` and standardized with a `StandardScaler` fitted only on training rows. The same transform is applied to validation and prediction rows. Validation loss is calculated after every epoch, and an independent copy of the lowest-validation-loss state is restored after all 100 epochs.
 
-The validation dataset must contain at least one row; otherwise validation-loss averaging divides by zero. No random seed is set, so initialization, batch order, and potentially device kernels make repeated fits nondeterministic.
-
-The `.pth` checkpoint stores only:
-
-- `model_state_dict`;
-- `input_dim`.
-
-It does not contain optimizer state, epoch, best validation loss, feature ordering, training settings, or a ready-to-call model object.
+The orchestration seeds Python, NumPy, Torch, and data-loader generators and requests deterministic cuDNN behavior. The `.pth` checkpoint stores the model state, input width, scaler mean and scale, and experiment metadata including feature order and split-independent training settings.
 
 ## Blackout-Image CNN
 
@@ -97,7 +88,7 @@ The CNN combines a fish-only blackout image with the same selected auxiliary tab
 
 ### Architecture
 
-The image backbone is ResNet-18. Loading first requests torchvision's default pretrained weights; any exception causes a silent fallback to an untrained ResNet-18. The classification layer is replaced with an identity mapping, producing 512 image features. All backbone parameters remain trainable.
+The image backbone is ResNet-18 with torchvision's default pretrained weights. Failure to obtain those weights raises an explicit error; random initialization is never substituted under the same experiment label. The classification layer is replaced with an identity mapping, producing 512 image features. All backbone parameters remain trainable.
 
 The image features are concatenated with the auxiliary vector and passed through:
 
@@ -116,7 +107,7 @@ Each blackout image is:
 3. converted to a tensor;
 4. normalized with ImageNet mean `[0.485, 0.456, 0.406]` and standard deviation `[0.229, 0.224, 0.225]`.
 
-There are no random crops, flips, color transforms, or other training-time augmentations. Auxiliary values are converted to `float32` and are not standardized.
+There are no random crops, flips, color transforms, or other training-time augmentations. Auxiliary values are converted to `float32` and standardized using training-only statistics.
 
 ### Optimization and Validation
 
@@ -124,9 +115,9 @@ The fixed settings are 100 maximum epochs, batch size 16, Adam at `1e-4`, and me
 
 The lowest validation-loss state is retained, and training stops after five consecutive epochs without improvement. If no validation image is available, training loss is used as the selection signal instead. At least one training blackout image is mandatory.
 
-Image records whose blackout file is absent are skipped while datasets are assembled. This does not create a safe partial-output path: the final prediction dataframe pairs predictions with the full input name column, so any skipped prediction image normally causes a length mismatch and aborts the run. Every retained row should therefore have a readable blackout image.
+Unreadable or missing blackout images are detected before fitting, and prediction construction requires exact name alignment with the validated dataframe.
 
-Predictions are rounded to two decimal places. The `.pth` checkpoint stores `model_state_dict` and `aux_size`; it omits optimizer state, epoch, feature ordering, transforms, and whether pretrained initialization succeeded.
+Predictions are rounded to two decimal places. The `.pth` checkpoint stores the model state, auxiliary width, scaler statistics, feature order, image preprocessing constants, pretrained weight identity, and optimization settings.
 
 ## Outside EfficientNet/Ridge Model
 
@@ -154,15 +145,9 @@ This internal type routing happens even though the orchestrator passes `per_type
 
 ### Cache and Artifact
 
-The first variant writes all embeddings, in dataframe row order, to:
+Embeddings and their manifest are stored under `checkpoints/<dataset-name>/cache/`. The manifest binds row order to every image name and content hash plus the exact pretrained weight identity. Any name, order, or content change recomputes the cache.
 
-```text
-checkpoints/<dataset-name>/efficientnet_b3_rotated_embeddings.npy
-```
-
-Later variants and later runs load that array whenever the file exists. The cache has no image-name manifest, signature, row-count validation, or preprocessing fingerprint. Delete it whenever rows or rotated images change. Reordering rows without changing their count is particularly dangerous because it can silently assign the wrong embedding to each target.
-
-Each Ridge artifact is a `.joblib` dictionary containing the fitted routed model, feature-set/depth/per-type values, fish-type lookup, and image-backbone/source labels. It does not include the image embeddings or pretrained backbone weights.
+Each Ridge artifact is a `.joblib` dictionary containing the fitted routed model, feature-set/depth/per-type values, feature order, fish-type lookup, and image-backbone/source labels. It does not include the image embeddings or pretrained backbone weights.
 
 ## Outside Multi-View DINOv2/Ridge Model
 
@@ -170,7 +155,7 @@ This model runs only in the standard `data-outside` orchestration and has the sa
 
 ### Self-supervised backbone
 
-The image features come from DINOv2 (`dinov2_vitb14` and `dinov2_vitl14`, loaded from `facebookresearch/dinov2` through `torch.hub`) rather than an ImageNet classifier. Held-out comparisons on this dataset put DINOv2 features well ahead of EfficientNet-B3, ConvNeXt-Base, EfficientNetV2-M and Swin-V2-B features, and the ImageNet backbones were not distinguishable from one another.
+The image features come from DINOv2 (`dinov2_vitb14` and `dinov2_vitl14`) loaded through `torch.hub` from the pinned repository revision `facebookresearch/dinov2:7764ea0f912e53c92e82eb728a2a1631e92725fc8`. Held-out comparisons on this dataset put DINOv2 features well ahead of EfficientNet-B3, ConvNeXt-Base, EfficientNetV2-M and Swin-V2-B features, and the ImageNet backbones were not distinguishable from one another.
 
 ### Multiple views per image
 
@@ -192,13 +177,13 @@ Each image is embedded nine times, under different resolutions and framings, and
 
 ### Derived geometry features
 
-Beyond the configured feature set, the model derives further inputs from columns already present in `processed.csv`, so no preprocessing rerun is required:
+Derived inputs are gated by the reported experiment label:
 
-- Scale-referenced spans: straight-line head-to-tail pixel distance and fish box diagonal, each divided by the image diagonal; mask area and major axis relative to the image diagonal.
-- Dimensionless body proportions: head and tail box size relative to the fish diagonal, head-to-tail box ratio, head and tail aspect ratios, mask fill ratio, perimeter-squared-over-area compactness, major-over-minor elongation.
-- Frame placement: fish centre coordinates as image fractions, image aspect ratio and diagonal.
-- Depth contrasts: body-minus-background relative depth, absolute head-minus-tail relative depth.
-- Log transforms of the size-valued columns above.
+- Every `coords` or `features` run adds coordinate-derived scale and proportion ratios, frame placement, and logs of permitted coordinate-size values.
+- `features` additionally adds segmentation fill, compactness, elongation, relative mask/axis values, and their permitted logs.
+- Only `_depth` runs add the absolute head-to-tail depth span.
+
+No context category is subtracted from numeric relative depth, and a no-depth label contains no derived depth value.
 
 ### Shrunk per-species ridge
 
@@ -208,51 +193,33 @@ Validation flags are ignored; RidgeCV selects alpha by internal cross-validation
 
 ### Cache and artifact
 
-Each view writes its own cache under `checkpoints/<dataset-name>/`:
+Each view writes its own embedding matrix and JSON manifest under `checkpoints/<dataset-name>/cache/`. The manifest records the pinned repository revision, view definition, exact ordered names, and every source-image content hash. Any image change, reorder, row change, view change, or revision change triggers re-extraction.
 
-```text
-dino_<backbone>_<source>_<size>_<framing>.npy
-dino_<backbone>_<source>_<size>_<framing>_names.json
-```
-
-The companion `_names.json` records the exact ordered image-name list the array was built for. The cache is reused only when that list matches the current dataframe, so a reordered or filtered `processed.csv` triggers re-extraction instead of silently binding embeddings to the wrong rows. Extraction needs network access on first run to fetch the DINOv2 weights.
-
-The `.joblib` artifact holds the fitted blended model, feature-set/depth/per-type values, fish-type lookup, backbone label, and the view list. It does not include embeddings or backbone weights.
+The `.joblib` artifact holds the fitted blended model, feature-set/depth/per-type values, exact feature order, fish-type lookup, pinned backbone revision, permitted derived columns, log sources, and view list. It does not include embeddings or backbone weights.
 
 ## Checkpoint Summary
 
-All artifacts are written under `checkpoints/<dataset-name>/`.
+Learned artifacts are written under an immutable `checkpoints/<dataset-name>/runs/<run-id>/` directory; reusable embeddings live under `checkpoints/<dataset-name>/cache/`.
 
 | Model | Extension | Saved content | Loaded by orchestrator on rerun |
 | --- | --- | --- | --- |
 | Mean baseline | None | No checkpoint | No |
-| Linear | `.joblib` | Fitted scikit-learn pipeline | No |
-| XGBoost | `.joblib` | Fitted XGBoost pipeline | No |
-| MLP | `.pth` | State dictionary and input width | No |
-| CNN | `.pth` | State dictionary and auxiliary width | No |
+| Linear/XGBoost | `.joblib` | Fitted model plus experiment and feature schema | No |
+| MLP | `.pth` | State, scaler statistics, input width, and metadata | No |
+| CNN | `.pth` | State, scaler statistics, image/backbone constants, and metadata | No |
 | EfficientNet/Ridge | `.joblib` | Routed Ridge model and metadata | No |
-| EfficientNet embeddings | `.npy` | Ordered embedding matrix | Yes, based only on file existence |
-| DINOv2/Ridge | `.joblib` | Blended Ridge model and metadata | No |
-| DINOv2 embeddings | `.npy` + `.json` | Ordered embedding matrix per view, with its name manifest | Yes, only when the manifest matches the current rows |
+| EfficientNet embeddings | `.npy` + `.json` | Ordered matrix with content manifest | Yes, only on an exact manifest match |
+| DINOv2/Ridge | `.joblib` | Blended Ridge model, revision, views, and metadata | No |
+| DINOv2 embeddings | `.npy` + `.json` | Ordered matrix per view with content manifest | Yes, only on an exact manifest match |
 
-Artifacts with the same experiment name are overwritten without confirmation. There is no checkpoint loading, resume, or skip-existing path for learned models.
-
-For per-fish-type core experiments, every fish type uses the same `_per_type` filename. The checkpoints overwrite one another as types are processed, leaving only the last fitted type on disk. The corresponding prediction column is still correct because predictions are collected in memory before the overwrite. Recovering all type-specific models requires changing the artifact strategy; the current checkpoint directory is not a complete per-type model registry.
+Per-fish-type core checkpoints append a normalized fish-type identifier, preserving every fitted species model within the run.
 
 ## Prediction and Evaluation Contract
 
 Every estimator predicts the dataframe it receives, not only test rows. The orchestrator supplies all complete retained rows to global models and all complete rows of one type to each per-type model. Split flags are preserved in the final table so evaluation can isolate validation or held-out test observations.
 
-The model package does not enforce:
+The orchestrator enforces unique image names, exclusive non-empty split partitions, and complete identifiers plus configured feature columns before any fit. Image-based pipelines additionally require exact alignment between dataframe names and readable artifacts.
 
-- one and only one active split flag per row;
-- unique image names;
-- nonempty train and validation subsets;
-- consistency between selected columns and a saved checkpoint;
-- consistency between image rows and the embedding cache.
+Ordinary least squares and Ridge are deterministic for fixed ordered inputs. XGBoost sets a random seed, and orchestration seeds Python, NumPy, Torch, data loaders, and deterministic cuDNN behavior. Pretrained backbone identities and DINOv2 revision are recorded, and the CNN fails instead of switching to random weights.
 
-Those are upstream data and orchestration requirements. Violating them can cause exceptions, duplicated joins, leakage, or predictions associated with the wrong image.
-
-## Reproducibility Notes
-
-Ordinary least squares and the Ridge configuration are deterministic for fixed ordered inputs. XGBoost explicitly sets a random seed. The MLP and CNN set no random seeds, and CUDA kernels are not forced into deterministic operation. CNN runs may also differ fundamentally when pretrained ResNet weights are available in one environment but not another. Saved prediction tables should therefore be treated as experiment artifacts and retained alongside the exact processed data and configuration used to produce them.
+The completed run manifest binds model artifacts and predictions to the exact processed CSV hash and serialized configuration. A failed run is not selected by `current.json`.

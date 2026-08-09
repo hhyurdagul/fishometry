@@ -1,62 +1,75 @@
 """Data loading utilities with Streamlit caching."""
 
-import os
-import streamlit as st
+from pathlib import Path
+
 import polars as pl
+import streamlit as st
 
 
 PREDICTION_ID_COLUMNS = {"name", "fish_type", "length", "is_train", "is_val", "is_test"}
 
 
-@st.cache_data
-def get_datasets():
-    """Get list of available datasets from data directory."""
-    data_dir = "data"
-    if not os.path.exists(data_dir):
+DATA_ROOT = Path("data")
+
+
+def _dataset_dir(dataset: str) -> Path:
+    root = DATA_ROOT.resolve()
+    candidate = (root / dataset).resolve()
+    if candidate.parent != root or not candidate.is_dir():
+        raise ValueError(f"Invalid dataset directory: {dataset}")
+    return candidate
+
+
+def get_datasets() -> list[str]:
+    """Return sorted datasets that expose metadata or predictions."""
+    if not DATA_ROOT.is_dir():
         return []
-    return [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+    return sorted(
+        path.name
+        for path in DATA_ROOT.iterdir()
+        if path.is_dir()
+        and ((path / "processed.csv").is_file() or (path / "predictions.csv").is_file())
+    )
 
 
 @st.cache_data
-def load_dataset_metadata(dataset):
-    """Load and concatenate metadata from all splits for a dataset."""
-    base_dir = f"data/{dataset}/processed"
-    dfs = []
-
-    single_file = f"data/{dataset}/processed.csv"
-    if os.path.exists(single_file):
-        try:
-            full_df = pl.read_csv(single_file)
-            names = full_df["name"].to_list() if "name" in full_df.columns else []
-            return full_df, names
-        except Exception as e:
-            print(f"Error reading {single_file}: {e}")
-
-    for split in ["train", "val", "test"]:
-        path = f"{base_dir}/processed_{split}.csv"
-        if os.path.exists(path):
-            try:
-                df = pl.read_csv(path)
-                df = df.with_columns(pl.lit(split).alias("split"))
-                dfs.append(df)
-            except Exception as e:
-                print(f"Error reading {path}: {e}")
-
-    if not dfs:
-        return None, []
-
-    full_df = pl.concat(dfs, how="diagonal")
-    names = full_df["name"].to_list()
-    return full_df, names
-
-
-@st.cache_data
-def load_prediction_df(dataset):
-    """Load the wide prediction CSV for a dataset."""
-    path = f"data/{dataset}/predictions.csv"
-    if not os.path.exists(path):
-        return None
+def _read_csv_versioned(path: str, size: int, modified_ns: int) -> pl.DataFrame:
+    del size, modified_ns
     return pl.read_csv(path)
+
+
+def _read_current_csv(path: Path) -> pl.DataFrame:
+    stat = path.stat()
+    return _read_csv_versioned(str(path), stat.st_size, stat.st_mtime_ns)
+
+
+def load_dataset_metadata(dataset: str):
+    """Load current processed metadata for a validated dataset."""
+    dataset_dir = _dataset_dir(dataset)
+    single_file = dataset_dir / "processed.csv"
+    if not single_file.is_file():
+        return None, []
+    try:
+        full_df = _read_current_csv(single_file)
+    except (OSError, pl.exceptions.PolarsError) as error:
+        print(f"Error reading {single_file}: {error}")
+        return None, []
+    if "name" not in full_df.columns:
+        print(f"Error reading {single_file}: missing name column")
+        return None, []
+    return full_df, full_df["name"].to_list()
+
+
+def load_prediction_df(dataset: str):
+    """Load the current wide prediction CSV for a validated dataset."""
+    path = _dataset_dir(dataset) / "predictions.csv"
+    if not path.is_file():
+        return None
+    try:
+        return _read_current_csv(path)
+    except (OSError, pl.exceptions.PolarsError) as error:
+        print(f"Error reading {path}: {error}")
+        return None
 
 
 def get_prediction_model_columns(df_pred):
@@ -164,7 +177,6 @@ def normalize_predictions(df_pred, model_columns=None, split=None, fish_types=No
     )
 
 
-@st.cache_data
 def load_all_predictions_for_image(dataset, image_name):
     """Load all model predictions for one image from the wide prediction CSV."""
     df_pred = load_prediction_df(dataset)

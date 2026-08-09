@@ -2,7 +2,6 @@ import os
 import tempfile
 import types
 import unittest
-from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -28,11 +27,18 @@ class FeatureSpecTests(unittest.TestCase):
         feats, _ = get_feature_names_and_desc("linear", "coords", depth=True)
         df = pl.DataFrame(
             {
-                "relative_w": [1.0], "relative_h": [1.0], "relative_area": [1.0],
-                "fish_aspect": [1.0], "fish_area": [1.0],
-                "head_depth": [1.0], "body_depth": [1.0], "tail_depth": [1.0],
-                "depth_gradient_raw": [1.0], "depth_gradient_abs": [1.0],
-                "fish_type_Cod": [1], "length": [10.0],
+                "relative_w": [1.0],
+                "relative_h": [1.0],
+                "relative_area": [1.0],
+                "fish_aspect": [1.0],
+                "fish_area": [1.0],
+                "head_depth": [1.0],
+                "body_depth": [1.0],
+                "tail_depth": [1.0],
+                "depth_gradient_raw": [1.0],
+                "depth_gradient_abs": [1.0],
+                "fish_type_Cod": [1],
+                "length": [10.0],
             }
         )
         selected = df.select(feats).columns
@@ -72,7 +78,7 @@ class BaselineTests(unittest.TestCase):
         )
         pred = train_baseline(df, config)
         by_name = dict(zip(pred["name"].to_list(), pred["mean_regression"].to_list()))
-        self.assertEqual(by_name["a"], 20.0)   # Cod mean
+        self.assertEqual(by_name["a"], 20.0)  # Cod mean
         self.assertEqual(by_name["c"], 200.0)  # Perch mean
 
 
@@ -119,9 +125,7 @@ class RegressionPipelineTests(unittest.TestCase):
 
     def _run(self, model_name: str) -> pl.DataFrame:
         seed_everything(5)
-        config = types.SimpleNamespace(
-            dataset=types.SimpleNamespace(name="unit-test")
-        )
+        config = types.SimpleNamespace(dataset=types.SimpleNamespace(name="unit-test"))
         df = self._make_df()
         with tempfile.TemporaryDirectory() as tmp:
             cwd = os.getcwd()

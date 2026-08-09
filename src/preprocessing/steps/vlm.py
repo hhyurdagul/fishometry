@@ -8,8 +8,24 @@ from google.genai import types
 from PIL import Image
 from tqdm import tqdm
 
+from src.artifacts import (
+    atomic_write_json,
+    build_signature,
+    cache_matches,
+    write_manifest,
+)
 from src.config import Config
 from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES
+
+MODEL_NAME = "gemma-4-31b-it"
+VLM_FEATURE_COLUMNS = [
+    "background_depth",
+    "has_other_objects",
+    "is_in_fishnet",
+    "fish_placement",
+    "fish_orientation",
+    "lighting_condition",
+]
 
 
 class VLM:
@@ -76,7 +92,7 @@ class VLM:
     def extract_fish_dataset_metadata(self, image: Image.Image) -> dict:
         time.sleep(5)
         response = self.client.models.generate_content(
-            model="gemma-4-31b-it",
+            model=MODEL_NAME,
             contents=[
                 "Analyze the image. Determine the fish's orientation and placement. "
                 "The fish is always fully visible. Be precise about the placement category.",
@@ -98,22 +114,31 @@ class VLMStep:
         self.vlm = VLM()
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images).drop_nulls()
+        result = self._process_images(df)
+        return result.drop_nulls(VLM_FEATURE_COLUMNS)
 
     def _get_features(
         self, name: str, image_path: Path, output_path: Path
     ) -> dict | None:
-        if output_path.exists():
-            with open(output_path, "r") as f:
-                return json.load(f)
+        signature = build_signature(
+            inputs={"image": image_path},
+            parameters={
+                "step": "vlm",
+                "version": 1,
+                "model": MODEL_NAME,
+                "feature_columns": VLM_FEATURE_COLUMNS,
+            },
+        )
+        if cache_matches(output_path, signature):
+            with output_path.open("r", encoding="utf-8") as stream:
+                return json.load(stream)
 
-        image = Image.open(image_path)
-        features = self.vlm.extract_fish_dataset_metadata(image)
+        with Image.open(image_path) as source:
+            features = self.vlm.extract_fish_dataset_metadata(source)
 
         features["name"] = name
-        with open(output_path, "w") as f:
-            json.dump(features, f)
-
+        atomic_write_json(output_path, features)
+        write_manifest(output_path, signature)
         return features
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -144,4 +169,9 @@ class VLMStep:
                 )
                 continue
 
-        return df.join(pl.DataFrame(data), on="name", how="left") if data else df
+        if not data:
+            return df.clear()
+        result = df.drop(VLM_FEATURE_COLUMNS, strict=False).join(
+            pl.DataFrame(data), on="name", how="left"
+        )
+        return result

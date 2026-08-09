@@ -6,24 +6,31 @@ import numpy as np
 import polars as pl
 from tqdm import tqdm
 
+from src.artifacts import (
+    atomic_write_image,
+    build_signature,
+    cache_matches,
+    write_manifest,
+)
 from src.config import Config
-from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES 
+from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES
 
 
-class RotateStep():
+class RotateStep:
     def __init__(self, config: Config):
         self.config = config
         self.input_dir = config.dataset.input_dir
         self.output_dir = config.dataset.output_dir / "rotated"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         if self.config.dataset.rotate:
             return df.pipe(self._process_images).drop_nulls()
         return df
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
-        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: list[dict]
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)
+        valid_names = []
 
         for row in tqdm(rows, desc="Rotation"):
             if any(value is None for value in row.values()):
@@ -34,20 +41,34 @@ class RotateStep():
             image_path = self.input_dir / name
             output_path = self.output_dir / name
 
-            if not image_path.exists() or output_path.exists():
+            if not image_path.is_file():
+                continue
+
+            signature = build_signature(
+                inputs={"image": image_path},
+                parameters={
+                    "step": "rotate",
+                    "version": 1,
+                    "coordinates": row,
+                },
+            )
+            if cache_matches(output_path, signature):
+                valid_names.append(name)
                 continue
 
             try:
                 rotated_image, _ = self._rotate_and_crop(image_path, row)
-                cv2.imwrite(str(output_path), rotated_image)
-            except Exception as e:
-                print(f"Error rotating {name}: {e}")
+                atomic_write_image(output_path, rotated_image)
+                write_manifest(output_path, signature)
+                valid_names.append(name)
+            except Exception as error:
+                print(f"Error rotating {name}: {error}")
 
-        return df
+        return df.filter(pl.col("name").is_in(valid_names))
 
     def _rotate_and_crop(self, image_path: Path, data: dict) -> tuple[np.ndarray, dict]:
         image = cv2.imread(str(image_path))
-        h, w = image.shape[:2] # type: ignore
+        h, w = image.shape[:2]  # type: ignore
 
         # 1. Calculate Angle (Tail to Head)
         # We want Tail on Left, Head on Right.
@@ -79,7 +100,7 @@ class RotateStep():
         M[0, 2] += (new_w / 2) - center[0]
         M[1, 2] += (new_h / 2) - center[1]
 
-        rotated_image = cv2.warpAffine(image, M, (new_w, new_h)) # type: ignore
+        rotated_image = cv2.warpAffine(image, M, (new_w, new_h))  # type: ignore
 
         # Check for upside down (if we rotated > 90 degrees)
         # If we rotated by > 90, the fish was facing Left-ish.

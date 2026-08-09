@@ -7,6 +7,12 @@ import polars as pl
 import torch
 from tqdm import tqdm
 
+from src.artifacts import (
+    atomic_save_numpy,
+    build_signature,
+    cache_matches,
+    write_manifest,
+)
 from src.config import Config
 from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_coord
 
@@ -15,7 +21,7 @@ v2_path = "third_party/Depth-Anything-V2"
 if v2_path not in sys.path:
     sys.path.append(v2_path)
 
-from depth_anything_v2.dpt import DepthAnythingV2  # type: ignore
+from depth_anything_v2.dpt import DepthAnythingV2  # type: ignore  # noqa: E402
 
 
 class DepthModel:
@@ -25,6 +31,7 @@ class DepthModel:
                 raise FileNotFoundError(
                     f"DepthAnythingV2 model not found at path: {model_path}"
                 )
+            model_path.parent.mkdir(parents=True, exist_ok=True)
             print(
                 f"Warning: DepthAnythingV2 weights not found at {model_path}, downloading..."
             )
@@ -45,7 +52,9 @@ class DepthModel:
             out_channels=[256, 512, 1024, 1024],
         )
 
-        model.load_state_dict(torch.load(self.model_path, map_location="cpu"))
+        model.load_state_dict(
+            torch.load(self.model_path, map_location="cpu", weights_only=True)
+        )
         model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         model.eval()
         return model
@@ -82,19 +91,32 @@ class DepthStep:
         self.depth_model = DepthModel(config.model_path.depth)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return df.pipe(self._process_images).drop_nulls()
+        return self._process_images(df)
 
     def _get_depth_map(self, image_path: Path, output_path: Path) -> np.ndarray:
-        if output_path.exists():
-            depth = np.load(output_path)
-        else:
-            image = cv2.imread(str(image_path))
-            if image is None:
-                raise ValueError(f"Could not read image: {image_path}")
+        signature = build_signature(
+            inputs={
+                "image": image_path,
+                "checkpoint": self.config.model_path.depth,
+            },
+            parameters={
+                "step": "depth",
+                "version": 1,
+                "encoder": "vitl",
+                "features": 256,
+                "out_channels": [256, 512, 1024, 1024],
+            },
+        )
+        if cache_matches(output_path, signature):
+            return np.load(output_path)
 
-            depth = self.depth_model.get_depth_map(image)
-            np.save(output_path, depth)
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"Could not read image: {image_path}")
 
+        depth = self.depth_model.get_depth_map(image)
+        atomic_save_numpy(output_path, depth)
+        write_manifest(output_path, signature)
         return depth
 
     def _get_robust_depth(
@@ -138,7 +160,7 @@ class DepthStep:
         }
 
     def _process_images(self, df: pl.DataFrame) -> pl.DataFrame:
-        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)  # type: ignore
+        rows = df.select(FISH_COORDINATE_FEATURES).rows(named=True)
 
         data = []
         for row in tqdm(rows, desc="Depth Estimation"):
@@ -162,4 +184,16 @@ class DepthStep:
                 print(f"Error processing depth for {name}: {e}")
                 continue
 
-        return df.join(pl.DataFrame(data), on="name", how="left") if data else df
+        if not data:
+            return df.clear()
+        feature_columns = [
+            "head_depth",
+            "body_depth",
+            "tail_depth",
+            "depth_gradient_raw",
+            "depth_gradient_abs",
+        ]
+        result = df.drop(feature_columns, strict=False).join(
+            pl.DataFrame(data), on="name", how="left"
+        )
+        return result.drop_nulls(feature_columns)

@@ -9,24 +9,27 @@ class SplitStep(PipelineStep):
     def __init__(self, config: Config):
         super().__init__(config)
 
-    def __split_frame(self, df: pl.DataFrame, train_ratio: float, val_ratio: float) -> pl.DataFrame:
+    def __split_frame(
+        self, df: pl.DataFrame, train_ratio: float, val_ratio: float
+    ) -> pl.DataFrame:
 
         train_size = int(len(df) * train_ratio)
         val_size = int(round(len(df) * val_ratio))
-        df_sampled = df.sample(
-            fraction=1, shuffle=True, seed=RANDOM_SEED
-        ).with_columns(
-            pl.lit(False).alias("is_train"), 
-            pl.lit(False).alias("is_val"), 
-            pl.lit(False).alias("is_test")
+        df_sampled = df.sample(fraction=1, shuffle=True, seed=RANDOM_SEED).with_columns(
+            pl.lit(False).alias("is_train"),
+            pl.lit(False).alias("is_val"),
+            pl.lit(False).alias("is_test"),
         )
 
         train_df = df_sampled[:train_size].with_columns(pl.lit(True).alias("is_train"))
-        val_df = df_sampled[train_size : train_size + val_size].with_columns(pl.lit(True).alias("is_val"))
-        test_df = df_sampled[train_size + val_size :].with_columns(pl.lit(True).alias("is_test"))
+        val_df = df_sampled[train_size : train_size + val_size].with_columns(
+            pl.lit(True).alias("is_val")
+        )
+        test_df = df_sampled[train_size + val_size :].with_columns(
+            pl.lit(True).alias("is_test")
+        )
 
         return pl.concat([train_df, val_df, test_df])
-
 
     def process(self, df: pl.DataFrame) -> tuple[pl.DataFrame, Config]:
         train_ratio = self.config.params.train_ratio

@@ -30,21 +30,22 @@ The selected dataset must already have completed split creation and preprocessin
 - one blackout image under `data/<dataset-name>/processed/blackout/` for every retained table row, because every configured run currently includes CNN training;
 - rotated images under `data/data-outside/processed/rotated/` for the outside-only embedding/Ridge experiments.
 
-The first CNN run attempts to load pretrained ResNet-18 weights. If they are unavailable, the CNN silently falls back to random ResNet-18 initialization. The outside embedding model requires pretrained EfficientNet-B3 weights when its embedding cache does not yet exist; those weights must already be in the local Torch cache or be downloadable.
+The CNN requires torchvision's pretrained ResNet-18 weights and fails explicitly if they cannot be loaded; it never substitutes random initialization under the same experiment name. EfficientNet-B3 and pinned DINOv2 backbones likewise require cached or downloadable pretrained weights when a matching embedding cache does not exist.
 
 ## Run Sequence
 
 The orchestrator performs these operations in order:
 
 1. Load the selected configuration and `processed.csv`.
-2. Drop every row containing a null in any column, including columns not used by a particular experiment.
-3. Create the training-only mean baseline.
+2. Validate unique names, boolean exclusive split membership, non-empty partitions, and non-null identifiers plus configured feature columns. Unselected nullable columns remain in the table.
+3. Create an immutable run directory and the training-only mean baseline.
 4. Train global linear, XGBoost, MLP, and CNN models for every configured feature-set/depth pair.
-5. When `fish_type_available` is true, repeat those four model families separately for every retained fish type.
-6. Only when the CLI value is exactly `data-outside`, train the outside EfficientNet/Ridge variants for every configured feature-set/depth pair.
-7. Join every prediction column by `name` and replace `data/<dataset-name>/predictions.csv`.
+5. When `fish_type_available` is true, repeat those four model families separately for every fish type with at least ten training rows.
+6. Only when the CLI value is exactly `data-outside`, train both EfficientNet/Ridge and DINOv2/Ridge variants for every configured feature-set/depth pair.
+7. Write versioned predictions, per-split metrics, checkpoint metadata, and content hashes into the run manifest.
+8. Atomically replace canonical `predictions.csv` and report CSVs, then publish `checkpoints/<dataset-name>/current.json`.
 
-Model checkpoints are written as each fit completes, but the prediction table is written only after the entire matrix succeeds. A failed run can therefore leave newly replaced checkpoints beside an older prediction table.
+A failed run can leave an unreferenced incomplete run directory, but it does not overwrite the canonical prediction table, reports, or current-run pointer.
 
 ## Experiment Matrix
 
@@ -55,17 +56,17 @@ Let `F` be the number of configured feature sets, `D` the number of configured d
 | Mean baseline | 1 calculation | 1 |
 | Four global model families | `4 x F x D` | `4 x F x D` |
 | Per-type core models, when enabled | `4 x F x D x S` | `4 x F x D` |
-| Outside EfficientNet/Ridge | `F x D` | `F x D` |
+| Outside EfficientNet/Ridge and DINOv2/Ridge | `2 x F x D` | `2 x F x D` |
 
 Per-type fits for different fish types are concatenated into one prediction column for each model/feature/depth combination. They therefore increase the number of fits, not the number of output columns by `S`.
 
 The checked-in configurations expand as follows:
 
-| Dataset | Feature sets | Depth settings | Per-type core pass | Outside embedding pass | Prediction columns |
+| Dataset | Feature sets | Depth settings | Per-type core pass | Outside embedding passes | Prediction columns |
 | --- | --- | --- | --- | --- | ---: |
 | `data-inside` | `eye`, `coords` | with and without depth | No | No | 17 |
 | `data-inside-zoom` | `eye`, `coords` | with and without depth | No | No | 17 |
-| `data-outside` | `coords`, `features` | with and without depth | Yes | Yes | 37 |
+| `data-outside` | `coords`, `features` | with and without depth | Yes | EfficientNet and DINOv2 | 41 |
 
 The counts include the mean baseline but exclude identifier, target, and split columns. For the outside dataset, the 16 per-type output columns represent `16 x S` separate fits.
 
@@ -100,7 +101,7 @@ For a per-type core pass, the dataframe is first restricted to one fish type and
 
 The test split remains held out from fitting and model selection. Predictions are nevertheless generated for train, validation, and test rows so downstream analysis can choose the desired split explicitly.
 
-## Outside EfficientNet/Ridge Experiments
+## Outside Embedding/Ridge Experiments
 
 The additional outside model combines three inputs:
 
@@ -112,6 +113,8 @@ A median-imputation, standardization, and Ridge cross-validation pipeline is fir
 
 The validation and test targets are not used. Embeddings are computed for all retained rows without using their targets, then reused across the four outside feature/depth variants.
 
+DINOv2 uses a pinned upstream commit and multiple content-validated rotated/blackout image views. Its derived tabular features obey the same feature-set and depth gates as the reported experiment name.
+
 ## Prediction Table Contract
 
 The output is a wide CSV at:
@@ -120,7 +123,7 @@ The output is a wide CSV at:
 data/<dataset-name>/predictions.csv
 ```
 
-It contains one row for every complete row retained after `processed.csv` is globally null-filtered, not necessarily every row originally emitted by preprocessing. The leading columns are:
+It contains one row for every validated preprocessing row used by the configured experiments. The leading columns are:
 
 - `name`, `length`, `is_train`, `is_val`, and `is_test`;
 - `fish_type` immediately after `name` when fish types are enabled.
@@ -139,29 +142,27 @@ Baseline, CNN, and embedding/Ridge predictions are rounded to two decimal places
 
 Because the table includes fitted-on rows, evaluation code must filter by `is_test` for a held-out estimate or by `is_val` for validation analysis. Metrics over the unfiltered table mix all three roles.
 
-## Checkpoints and Embedding Cache
+## Checkpoints, Runs, and Embedding Cache
 
-Completed fits are saved under `checkpoints/<dataset-name>/`:
+Each invocation stages artifacts below:
 
-- linear, XGBoost, and EfficientNet/Ridge models use `.joblib`;
-- MLP and CNN models use `.pth` state dictionaries;
-- the outside rotated-image embeddings use `efficientnet_b3_rotated_embeddings.npy`.
+```text
+checkpoints/<dataset-name>/runs/<run-id>/
+data/<dataset-name>/runs/<run-id>/predictions.csv
+reports/<dataset-name>/runs/<run-id>/{train,val,test}.csv
+```
 
-Checkpoint names match prediction column names. Existing files with the same name are replaced. The training command never loads a saved model and has no resume or skip-existing behavior; checkpoints are artifacts for later inspection or custom inference, not inputs to the orchestrated run.
+Linear, XGBoost, EfficientNet/Ridge, and DINOv2/Ridge use `.joblib`; MLP and CNN use `.pth`. Every checkpoint includes the feature ordering and experiment metadata needed to identify its config, depth flag, species scope, image source, backbone, preprocessing constants, and upstream DINO revision where applicable.
 
-All fish-type-specific fits for one experiment write to the same `_per_type` checkpoint path. Each type overwrites the preceding type, so the final file contains only whichever type was processed last even though `predictions.csv` correctly combines predictions from every type. The iteration order is not a stable model registry. Do not treat a `_per_type` checkpoint as the complete set of species models.
+Per-type checkpoint names append a normalized fish-type identifier after the prediction-column name, so one species cannot overwrite another. Embedding caches live under `checkpoints/<dataset-name>/cache/`; their manifests include ordered image names, image content hashes, backbone/weight or repository revision, view, and framing.
 
-The EfficientNet embedding cache is reused solely because the `.npy` file exists. It does not store image names and is not checked against the current row count, order, image content, or preprocessing state. Delete that cache before rerunning after adding, removing, reordering, replacing, or reprocessing outside rows. A stale cache can either cause an array-shape failure or silently pair an embedding with the wrong row.
+The run manifest records hashes for the processed input, predictions, reports, and every checkpoint. `current.json` is written only after canonical outputs are published. Training never resumes from checkpoints or skips an experiment automatically.
 
 ## Reproducibility and Failure Conditions
 
-- XGBoost sets `random_state=42`. The MLP and CNN do not set Python, NumPy, Torch, data-loader, or deterministic-kernel seeds, so their predictions and best epochs can vary between runs.
-- CNN initialization can change from pretrained to random depending on whether pretrained weights are available. The fallback is automatic.
-- Existing checkpoints and `predictions.csv` are replaced without confirmation. Preserve experiment artifacts outside their generated paths when a historical run must remain immutable.
-- Empty training splits fail every learned model. Empty validation splits fail the MLP and can make XGBoost unusable; the CNN falls back to training loss only when its validation image dataset is empty.
-- The CNN image loader skips missing blackout files, but output construction still assumes one prediction per retained table row. In practice every retained row must have a readable blackout image or the run will fail rather than emit a partial CNN column.
-- The embedding model requires every retained outside row to have a readable rotated image. It does not skip missing files.
-- Tabular core models do not impute or scale their inputs, and the orchestrator's global null removal is their only missing-value handling. The outside Ridge pipeline includes imputation and scaling, though normally no null remains by that point.
-- A duplicate `name`, overlapping split flags, or missing required feature columns is not repaired by training and can produce invalid joins, leakage, or an exception.
-
-When a run fails, fix or regenerate the upstream processed artifacts first. Then remove any stale outside embedding cache when row identity or order changed and rerun the complete command.
+- Python, NumPy, and Torch are seeded; deterministic cuDNN behavior is enabled.
+- Missing pretrained CNN weights fail the experiment instead of changing its initialization.
+- Empty or invalid split partitions, duplicate names, overlapping flags, missing configured features, or nulls in selected inputs fail before training.
+- Every retained row must have a readable blackout image; outside embedding models additionally require the configured image views.
+- Core tabular models require complete selected inputs. The outside Ridge pipelines retain their own median imputation and standardization.
+- Canonical predictions, reports, and the current-run pointer remain on the previous complete run if any fit or publication preparation fails.

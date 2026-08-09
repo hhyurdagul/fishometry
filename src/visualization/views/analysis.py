@@ -104,9 +104,7 @@ def render_analysis(dataset, df_meta, all_image_names):
     if img_row.get("fish_type") is not None:
         row_data["Specific Prediction"]["Fish Type"] = img_row["fish_type"]
 
-    img_raw, img_rot, img_depth, _ = process_images(
-        dataset, selected_err_img, row_data
-    )
+    img_raw, img_rot, img_depth, _ = process_images(dataset, selected_err_img, row_data)
 
     c1, c2, c3 = st.columns(3)
     with c1:

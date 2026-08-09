@@ -150,26 +150,13 @@ of selected models.
 
 ## Correlation Analysis
 
-The correlation renderer is implemented and exported from the views package, but
-the application entry point neither imports it nor defines a sidebar route for
-it. It is not an active mode in the standard Streamlit interface.
-
-If routed in the future, it expects processed metadata with `length` and searches
-for available bounding-box, scaled-dimension, head/tail, depth, and
-species-statistic features. It drops rows containing nulls in the chosen analysis
-columns and requires at least ten complete samples. Its displays comprise:
+The routed correlation view expects processed metadata with `length` and searches for available bounding-box, scaled-dimension, head/tail, depth, and species-statistic features. It drops rows containing nulls in the selected analysis columns and requires at least ten complete samples. Its displays comprise:
 
 - each selected feature's correlation with length;
 - a labeled feature/target correlation matrix;
-- an interactive feature-versus-length scatter plot with a regression line and
-  optional fish-type coloring;
-- mean, standard deviation, minimum, maximum, and target correlation for each
-  selected feature.
+- an interactive feature-versus-length scatter plot with a regression line and optional fish-type coloring;
+- mean, standard deviation, minimum, maximum, and target correlation for each selected feature.
 
-Exporting a renderer only makes it importable; it does not make it selectable in
-Streamlit. The currently routed views are Data Explorer, Prediction
-Visualization, Error Analysis, Model Comparison, and, when fish types exist,
-Fish Type Comparison and Model x Fish Type Heatmap.
 
 ## Image and Depth Lookup
 

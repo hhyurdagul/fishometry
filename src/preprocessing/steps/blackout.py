@@ -3,6 +3,12 @@ import numpy as np
 import polars as pl
 from tqdm import tqdm
 
+from src.artifacts import (
+    atomic_write_image,
+    build_signature,
+    cache_matches,
+    write_manifest,
+)
 from src.config import Config
 
 
@@ -32,10 +38,18 @@ class BlackoutStep:
             mask_path = self.mask_dir / (name + ".npy")
             output_path = self.output_dir / name
 
-            if not image_path.exists() or not mask_path.exists():
+            if not image_path.is_file() or not mask_path.is_file():
                 continue
 
-            if output_path.exists():
+            signature = build_signature(
+                inputs={"image": image_path, "mask": mask_path},
+                parameters={
+                    "step": "blackout",
+                    "version": 1,
+                    "canvas_size": list(self.canvas_size),
+                },
+            )
+            if cache_matches(output_path, signature):
                 valid_names.append(name)
                 continue
 
@@ -82,8 +96,8 @@ class BlackoutStep:
 
                 scale = min(target_w / w, target_h / h)
                 # Let's upscale or downscale
-                new_w = int(w * scale)
-                new_h = int(h * scale)
+                new_w = max(1, round(w * scale))
+                new_h = max(1, round(h * scale))
 
                 resized_fish = cv2.resize(
                     fish_crop, (new_w, new_h), interpolation=cv2.INTER_LINEAR
@@ -97,11 +111,11 @@ class BlackoutStep:
 
                 canvas[y_off : y_off + new_h, x_off : x_off + new_w] = resized_fish
 
-                # Save
-                cv2.imwrite(str(output_path), canvas)
+                atomic_write_image(output_path, canvas)
+                write_manifest(output_path, signature)
                 valid_names.append(name)
 
-            except Exception as e:
-                print(f"Error processing {name}: {e}")
-        
+            except Exception as error:
+                print(f"Error processing {name}: {error}")
+
         return df.filter(pl.col("name").is_in(valid_names))

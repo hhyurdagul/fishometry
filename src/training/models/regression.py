@@ -5,9 +5,8 @@ Provides a shared dataframe/config-based interface for linear regression,
 XGBoost, and MLP models.
 """
 
-import os
+from pathlib import Path
 
-import joblib
 import numpy as np
 import polars as pl
 import torch
@@ -20,6 +19,12 @@ from torch.utils.data import DataLoader, Dataset
 from xgboost import XGBRegressor
 
 from src.config import Config
+from src.training.artifacts import (
+    atomic_joblib_dump,
+    atomic_torch_save,
+    checkpoint_directory,
+    checkpoint_stem,
+)
 from src.training.data_loader import get_feature_names_and_desc
 
 
@@ -31,7 +36,7 @@ class TabularDataset(Dataset):
     def __len__(self):
         return len(self.X)
 
-    def __getitem__(self, idx): # type: ignore
+    def __getitem__(self, idx):  # type: ignore
         return self.X[idx], self.y[idx]
 
 
@@ -51,7 +56,9 @@ class FishMLP(nn.Module):
 
 
 class MLPRegressor:
-    def __init__(self, input_dim: int, epochs: int = 100, batch_size: int = 32, lr: float = 1e-3):
+    def __init__(
+        self, input_dim: int, epochs: int = 100, batch_size: int = 32, lr: float = 1e-3
+    ):
         self.input_dim = input_dim
         self.epochs = epochs
         self.batch_size = batch_size
@@ -90,7 +97,6 @@ class MLPRegressor:
                 optimizer.step()
                 epoch_loss += loss.item() * X_batch.size(0)
 
-
             val_loss = 0
             self.model.eval()
             with torch.no_grad():
@@ -127,13 +133,15 @@ class MLPRegressor:
 
         return np.asarray(predictions)
 
-    def save(self, path: str):
-        torch.save(
+    def save(self, path: str | Path, metadata: dict | None = None) -> None:
+        path = Path(path)
+        atomic_torch_save(
             {
                 "model_state_dict": self.model.state_dict(),
                 "input_dim": self.input_dim,
                 "scaler_mean": self.scaler.mean_,
                 "scaler_scale": self.scaler.scale_,
+                "metadata": metadata or {},
             },
             path,
         )
@@ -148,17 +156,22 @@ def build_xgboost_model(
     max_depth: int = 4,
     learning_rate: float = 0.1,
 ) -> Pipeline:
-    return Pipeline([
-        
-        ("regressor", XGBRegressor(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            random_state=42,
-            n_jobs=-1,
-            early_stopping_rounds=20,
-        ))
-    ])
+    return Pipeline(
+        [
+            (
+                "regressor",
+                XGBRegressor(
+                    n_estimators=n_estimators,
+                    max_depth=max_depth,
+                    learning_rate=learning_rate,
+                    random_state=42,
+                    n_jobs=-1,
+                    early_stopping_rounds=20,
+                ),
+            )
+        ]
+    )
+
 
 def build_mlp_model(
     input_dim: int,
@@ -183,8 +196,11 @@ def run_model_pipeline(
     feature_set: str,
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
-    features, feature_desc = get_feature_names_and_desc(model_name, feature_set, depth, per_type)
+    features, feature_desc = get_feature_names_and_desc(
+        model_name, feature_set, depth, per_type
+    )
 
     X_train = df.filter(pl.col("is_train")).select(features).to_numpy()
     y_train = df.filter(pl.col("is_train")).select("length").to_numpy().ravel()
@@ -193,33 +209,50 @@ def run_model_pipeline(
     y_val = df.filter(pl.col("is_val")).select("length").to_numpy().ravel()
 
     print(f"Training {feature_desc} model on {config.dataset.name}...")
-    
+
     if model_name == "linear":
         model = build_linear_model()
         model.fit(X_train, y_train)
     elif model_name == "xgboost":
         model = build_xgboost_model()
-        model.fit(X_train, y_train, regressor__eval_set=[(X_val, y_val)], regressor__verbose=False)
+        model.fit(
+            X_train,
+            y_train,
+            regressor__eval_set=[(X_val, y_val)],
+            regressor__verbose=False,
+        )
     else:
         model = build_mlp_model(X_train.shape[1])
         model.fit(X_train, y_train, X_val, y_val)
 
-    model_dir = os.path.join("checkpoints", config.dataset.name)
-    os.makedirs(model_dir, exist_ok=True)
+    model_dir = checkpoint_directory(config, checkpoint_dir)
+    feature_names = df.select(features).columns
+    metadata = {
+        "model": model_name,
+        "dataset": config.dataset.name,
+        "feature_set": feature_set,
+        "depth": depth,
+        "per_type": per_type,
+        "feature_names": feature_names,
+    }
+    stem = checkpoint_stem(feature_desc, df, per_type)
 
     if isinstance(model, MLPRegressor):
-        model.save(os.path.join(model_dir, feature_desc + ".pth"))
+        model.save(model_dir / f"{stem}.pth", metadata)
     else:
-        joblib.dump(model, os.path.join(model_dir, feature_desc + ".joblib"))
-    
-    pred = pl.DataFrame({
-        "name": df["name"].to_numpy(), 
-        feature_desc: model.predict(df.select(features).to_numpy())
-    })
+        atomic_joblib_dump(
+            {"model": model, "metadata": metadata},
+            model_dir / f"{stem}.joblib",
+        )
+
+    pred = pl.DataFrame(
+        {
+            "name": df["name"].to_numpy(),
+            feature_desc: model.predict(df.select(features).to_numpy()),
+        }
+    )
 
     return pred
-
-
 
 
 def train_linear_model(
@@ -228,8 +261,11 @@ def train_linear_model(
     feature_set: str,
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
-    return run_model_pipeline("linear", df, config, feature_set, depth, per_type)
+    return run_model_pipeline(
+        "linear", df, config, feature_set, depth, per_type, checkpoint_dir
+    )
 
 
 def train_xgboost_model(
@@ -238,8 +274,12 @@ def train_xgboost_model(
     feature_set: str,
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
-    return run_model_pipeline("xgboost", df, config, feature_set, depth, per_type)
+    return run_model_pipeline(
+        "xgboost", df, config, feature_set, depth, per_type, checkpoint_dir
+    )
+
 
 def train_mlp_model(
     df: pl.DataFrame,
@@ -247,5 +287,8 @@ def train_mlp_model(
     feature_set: str,
     depth: bool = False,
     per_type: bool = False,
+    checkpoint_dir: Path | None = None,
 ) -> pl.DataFrame:
-    return run_model_pipeline("mlp", df, config, feature_set, depth, per_type)
+    return run_model_pipeline(
+        "mlp", df, config, feature_set, depth, per_type, checkpoint_dir
+    )

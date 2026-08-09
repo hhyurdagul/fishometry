@@ -40,9 +40,7 @@ data/<dataset-name>/
 | `fish_type` | Fish category; required when `fish_type_available` is enabled. |
 
 Extra metadata columns are carried through the split and augmentation outputs.
-Image names must be non-empty normalized relative paths. Absolute paths, parent
-directory traversal, and paths that resolve outside `raw/` are rejected before
-augmentation writes destination artifacts.
+Image names must be non-empty normalized relative paths. Absolute paths, parent directory traversal, and paths resolving outside `raw/` are rejected. Required values must be non-null, names must be unique, every image must exist and decode, and byte-identical content cannot appear under multiple rows.
 
 ## Split Mode
 
@@ -52,8 +50,7 @@ Run split mode without `--augment`:
 uv run python -m src.create_data.run --dataset-name <dataset-name>
 ```
 
-The pipeline reads `raw.csv`, removes every row containing a null value, shuffles
-the remaining observations, and adds three boolean columns:
+The runner validates the source manifest and images before shuffling, preserves unrelated metadata (including nullable fields), and adds three boolean columns:
 
 - `is_train`
 - `is_val`
@@ -102,9 +99,9 @@ The persisted source `split.csv` must satisfy all of these conditions:
 - `name`, `length`, `is_train`, `is_val`, and `is_test` are present;
 - `fish_type` is present when the source configuration enables fish types;
 - required values are not null;
-- image names are unique;
-- every source and generated image path remains inside its dataset's `raw/`
-  directory;
+- image names are unique, normalized relative paths;
+- every referenced image exists, is a regular readable image, and remains inside the dataset's `raw/` directory;
+- no two rows reference byte-identical image content;
 - all three split columns are boolean; and
 - each row has exactly one split flag set to `true`.
 

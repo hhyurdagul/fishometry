@@ -137,6 +137,10 @@ ground truth, prediction, error, and a three-column raw, rotated/annotated, and
 depth image layout. Processed metadata enriches annotations but is optional.
 Blackout images are not shown in this mode.
 
+### Correlation Analysis
+
+Available whenever processed metadata exists. It lets the user select numeric geometry, depth, and species-statistic fields, then reports correlations with length, a feature/target heatmap, scatter plots with regression lines, and descriptive statistics. At least ten complete rows are required for the selected columns.
+
 ### Model Comparison
 
 Requires a valid prediction table. It evaluates every discovered model over the
@@ -186,36 +190,22 @@ absolute error divided by ground truth.
 
 ## Cache Refresh
 
-Dataset discovery, processed metadata, prediction tables, available depth models,
-and per-image prediction lookups use Streamlit's data cache. Generating or
-replacing artifacts while the app is open may therefore leave the interface
-showing an older dataset list or table even after a widget-triggered rerun.
+Dataset discovery is evaluated on each rerun. Processed and prediction CSV caches include file size and nanosecond modification time, so atomically published replacements are loaded automatically. A manual Streamlit cache clear remains useful only for external files whose own loader does not yet carry a version key.
 
-Use **Clear cache** from the Streamlit application menu and rerun the page, or
-stop and relaunch the Streamlit process. A normal browser refresh alone is not a
-reliable cache reset.
+## Correlation View
 
-## Correlation View Status
-
-A correlation renderer exists and is exported by the views package, but the main
-application does not add it to the sidebar or route a mode to it. Correlation
-analysis is therefore not available through the launched interface. The active
-sidebar modes are exactly the six modes described above, with the final two
-conditional on fish-type data.
+`Correlation Analysis` is a standard sidebar mode and receives the selected dataset's processed metadata. The two fish-type comparison modes remain conditional on non-null `fish_type` values.
 
 ## Troubleshooting
 
-- **No datasets found:** start the app from the repository root and confirm that
-  `data/` contains at least one dataset directory.
-- **Metadata warning:** generate `processed.csv`, or provide at least one of the
-  split-specific processed tables with a `name` column.
+- **No datasets found:** start the app from the repository root and confirm that `data/` contains a dataset with `processed.csv` or `predictions.csv`.
+- **Metadata warning:** generate a readable `processed.csv` containing a `name` column.
 - **No prediction CSV or no model columns:** run training and verify the wide
   prediction-table contract above.
 - **No images in Data Explorer:** verify that `name` exists in predictions or
   processed metadata and that the current filters retain at least one row.
 - **No depth selector:** model-specific depth subdirectories were not found. A
   compatible root-level depth array can still render without the selector.
-- **Recently generated files are missing:** clear Streamlit's cache and rerun.
 
 See [views/README.md](views/README.md) for the component-level behavior of each
 screen.

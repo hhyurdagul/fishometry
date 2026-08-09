@@ -38,7 +38,7 @@ The table is joined by image name and then all null rows are dropped. This means
 - Final rotated pass: reads rotated images and writes `processed/cache/yolo_rotated/<name>.json`.
 - With rotation disabled, both passes use the initial raw-image cache.
 
-Existing JSON is trusted without validating the current image, checkpoint, label order, or confidence setting.
+Cached JSON is accepted only when its sidecar manifest matches the image hash, checkpoint hash, class order, confidence, pass variant, and step version.
 
 ## `rotate.py`: Horizontal Alignment
 
@@ -51,7 +51,7 @@ Rotation requires head and tail box centers from the initial detector.
 5. Estimate and crop the largest axis-aligned rectangle that excludes rotation borders.
 6. Write the result with the original filename under `processed/rotated/`.
 
-Existing output images are reused. Coordinate transformation is deliberately not propagated: the final detector measures body parts again in the rotated coordinate system.
+Existing output images are reused only when their sidecar manifests match the source image, detection coordinates, rotation parameters, and step version. Coordinate transformation is deliberately not propagated: the final detector measures body parts again in the rotated coordinate system.
 
 When rotation is disabled, the stage returns the table unchanged.
 
@@ -68,21 +68,17 @@ The output is relative monocular depth. Values are useful for within-image and l
 
 ### Cache and sampled values
 
-The full floating-point map is stored at `processed/depth/<name>.npy`. If that file exists, model inference is skipped.
+The full floating-point map is stored at `processed/depth/<name>.npy`. Its manifest covers the source image, depth checkpoint, model settings, and step version; any mismatch reruns inference.
 
 The step calculates box centers for head, fish body, and tail. It takes the median of a clipped 9 by 9 patch around each center to reduce single-pixel noise. Joined columns are:
 
 - `head_depth`
 - `body_depth`
 - `tail_depth`
-- `depth_gradient_raw`
-- `depth_gradient_abs`
+- `depth_gradient_raw`, equal to head depth minus tail depth
+- `depth_gradient_abs`, the absolute head-to-tail difference
 
-Any image or metric error is logged, and the later null removal excludes that row.
-
-### Current limitation
-
-The current assignment sets head depth equal to tail depth and stores tail depth in both gradient columns. These fields must not be interpreted as a valid head-to-tail gradient until the implementation and derived artifacts are corrected. The missing-weight auto-download branch is also not reliable, so the configured checkpoint must be present.
+Any image or metric error is logged, and null removal over these five required outputs excludes that row. Missing weights trigger the configured download path before model construction.
 
 ## `segment.py`: Fish Mask and Shape
 
@@ -93,7 +89,7 @@ The current assignment sets head depth equal to tail depth and stores tail depth
 - Requests one mask rather than multiple candidates.
 - Saves the binary result at `processed/segment/<name>.npy`.
 
-Existing masks are reused without checking the image or prompts.
+Existing masks are reused only when the source image, SAM checkpoint, prompt coordinates, and step version match the sidecar manifest.
 
 ### Geometric features
 
@@ -141,13 +137,13 @@ The stage reads `GEMINI_API_KEY` from `.env.json` during construction. Each unca
 
 ### Rotation and cache order
 
-The cache path is `processed/cache/vlm/<name>.json`. Cache lookup occurs first:
+The cache path is `processed/cache/vlm/<name>.json`. Its sidecar manifest covers the source image, prompt schema, remote model identifier, and feature schema:
 
-- A cached original-image response is joined regardless of rotation.
+- A matching original-image response is joined regardless of rotation.
 - With rotation enabled, an uncached image receives no remote request and no new context row.
-- With rotation disabled, an uncached raw image is submitted and its response is cached.
+- With rotation disabled, an uncached raw image is submitted and its response and manifest are cached.
 
-This allows scene features from original outdoor photographs to remain attached to geometry measured after alignment. If only some rows have cache entries, joined nulls can remove the other rows.
+This allows source-scene features to remain attached to geometry measured after alignment. When `features` is configured, rows without complete context values do not survive this stage.
 
 ## `feature.py`: Engineered Features
 
@@ -163,7 +159,7 @@ This final stage does not write image artifacts. It transforms the enriched tabl
 | `fish_aspect` | Fish box width / fish box height |
 | `fish_area` | Square root of fish box area |
 
-Current detector output assigns the image dimensions to width and height columns in reverse order. This affects the two one-dimensional relative values; multiplying the two dimensions leaves relative area unchanged.
+Detector output stores width and height in their matching columns, so all relative-geometry denominators use the intended image axis.
 
 ### Fish-type encoding
 
@@ -173,8 +169,7 @@ When fish types are enabled, the stage creates `fish_type_<value>` dummy columns
 
 - Background depth becomes `far = 1` and `close = 0`.
 - Object and fishnet booleans become integers.
-- Placement and orientation become dummy columns when present.
-- The implementation currently searches for `lightning_condition`, while new context uses `lighting_condition`; newly generated lighting categories are not encoded by this stage.
+- Placement, orientation, and lighting condition become dummy columns when present.
 
 Strict category replacement can raise when an unexpected background value is present.
 
@@ -184,10 +179,9 @@ The shared coordinate selection requires image name and all four box boundaries 
 
 ## Failure and Reuse Summary
 
-- Per-image detection, rotation, depth, segmentation, blackout, and context errors are generally logged and skipped.
-- Joins followed by `drop_nulls()` turn many skipped steps into permanent row attrition.
-- Missing global prerequisites, malformed caches, missing columns, or feature-encoding errors can abort the entire pipeline.
-- Artifacts are reused solely by filename and are never pruned automatically.
-- A successful final table can coexist with older unreferenced files in every artifact directory.
+- Per-image errors are logged and become explicit row attrition in the preprocessing report.
+- Each step drops nulls only from the columns it requires or produces.
+- Missing global prerequisites, malformed input contracts, missing columns, or feature-encoding errors abort the pipeline before final publication.
+- Artifacts are reused only when content-aware manifests match; unreferenced historical artifacts are reported but not pruned automatically.
 
 See the parent [preprocessing README](../README.md) for the full run contract and downstream handoff.

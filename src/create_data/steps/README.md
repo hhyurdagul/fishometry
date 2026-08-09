@@ -24,8 +24,7 @@ augmentation, it is the predefined zoom-dataset configuration.
 
 ### Input
 
-The runner supplies the source `raw.csv` after dropping rows that contain nulls.
-The dataframe retains every remaining source metadata column.
+The runner supplies the validated source `raw.csv`. Required metadata is complete; image names and image content are unique; all referenced files are readable; unrelated source columns are retained.
 
 ### Operation
 

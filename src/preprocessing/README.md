@@ -16,14 +16,7 @@ uv run python -m src.preprocessing.run --dataset-name data-outside
 
 ## Prerequisites
 
-The selected config must be valid, and `data/<dataset>/split.csv` must already exist. Preprocessing constructs every stage before processing the first row, so a run also requires:
-
-- The configured YOLO checkpoint.
-- The configured Segment Anything ViT-L checkpoint.
-- The configured Depth Anything V2 ViT-L checkpoint.
-- The initialized `third_party/Depth-Anything-V2` submodule.
-- `.env.json` containing `GEMINI_API_KEY`, even when rotation prevents new context requests.
-- Raw images whose names match the split metadata.
+The selected config and `data/<dataset>/split.csv` must be valid. Every run requires the configured YOLO and Segment Anything checkpoints plus the raw images named by the split. A configured `true` depth experiment additionally requires the Depth Anything V2 checkpoint and initialized submodule. A configured `features` experiment constructs the context stage and therefore requires `.env.json` containing `GEMINI_API_KEY`.
 
 GPU execution is used automatically when available. CPU execution is possible but depth, segmentation, and neural inference can be slow.
 
@@ -38,7 +31,7 @@ GPU execution is used automatically when available. CPU execution is possible bu
 - `is_test`
 - `fish_type` when the config enables fish types
 
-Input rows containing any null are removed immediately. Image names are expected to be unique and relative to the raw image folder.
+Required input columns cannot contain nulls. Image names must be unique normalized paths relative to the raw image folder, and every row must belong to exactly one split. Unrelated nullable columns are retained.
 
 ## Pipeline Order
 
@@ -47,13 +40,13 @@ Input rows containing any null are removed immediately. Image names are expected
 | 1 | Initial detection | Raw image | Head, tail, fish, and optional eye boxes used for alignment | Rows without complete usable detections are removed |
 | 2 | Rotation | Raw image | Tail-to-head alignment and cropped rotated image | Skipped when rotation is disabled |
 | 3 | Final detection | Rotated image, or raw image when rotation is disabled | Image dimensions and final body-part boxes | Rows without complete usable detections are removed |
-| 4 | Relative depth | Same image as final detection | Full depth array and sampled head/body/tail values | Failed or missing results become null and are removed |
+| 4 | Relative depth, when any configured depth flag is true | Same image as final detection | Full depth array and sampled head/body/tail values | Failed or missing results become null and are removed |
 | 5 | Segmentation | Same image as final detection | Binary fish mask and contour geometry | Failed or missing results become null and are removed |
-| 6 | Blackout image | Image plus segmentation mask | Isolated fish centered on a 224 by 224 canvas | Failures are logged but do not directly remove metadata rows |
-| 7 | Original-image context | Raw image or existing cache | Scene placement, orientation, lighting, and object indicators | Cache is reused before rotation policy is checked |
-| 8 | Feature engineering | Enriched metadata | Relative geometry, fish-type dummies, and encoded context | Missing required columns or invalid categories can abort the run |
+| 6 | Blackout image | Image plus segmentation mask | Isolated fish centered on a 224 by 224 canvas | Failed writes remove the row |
+| 7 | Original-image context, when `features` is configured | Raw image or valid cache | Scene placement, orientation, lighting, and object indicators | Missing required context removes the row |
+| 8 | Feature engineering | Enriched metadata | Relative geometry, fish-type dummies, and encoded context | Missing required columns or invalid categories abort the run |
 
-After all stages finish, the current dataframe replaces `data/<dataset>/processed.csv`.
+After all selected stages finish, `processed.csv` is replaced atomically and `processed/preprocessing_report.json` records each stage's input count, output count, and dropped names.
 
 ## Rotation Modes
 
@@ -88,6 +81,7 @@ Original-image context is deliberately separate from geometric alignment. Existi
 | `processed/segment/` | NumPy array named `<image-name>.npy` | Binary segmentation mask |
 | `processed/blackout/` | Original image extension | Isolated fish on a fixed 224 by 224 canvas |
 | `processed.csv` | CSV | Final labels, split flags, detections, depth, mask geometry, context, and engineered features |
+| `processed/preprocessing_report.json` | JSON | Per-stage row attrition for the most recent successful run |
 
 The final table does not contain paths to generated artifacts. Image name is the key used to resolve every artifact.
 
@@ -138,45 +132,26 @@ Fish-aware datasets receive one dummy column per observed type while retaining t
 
 ## Row Attrition
 
-Preprocessing is a complete-case pipeline rather than a one-to-one conversion of the split table. Rows can disappear because:
+Preprocessing records complete cases for the stages required by the configured experiment matrix. Rows can disappear because:
 
-- The split row already contains a null.
-- The raw or rotated image is missing.
+- A required split value is null or split membership is invalid, which aborts before processing.
+- The raw or rotated image is missing or unreadable.
 - The detector finds no object, duplicate class IDs, or an incomplete required class set.
-- Rotation cannot produce a readable output.
-- Depth inference or sampling fails.
-- Segmentation fails or yields unusable geometry.
-- Only some context rows are cached and the joined context columns are null for the rest.
+- Rotation, depth inference, depth sampling, segmentation, blackout writing, or required context extraction fails.
 
-The final `processed.csv` therefore commonly contains fewer records than `split.csv`. Training applies another full-row null removal before fitting.
+Unrelated nullable columns do not remove rows. The final `processed.csv` commonly contains fewer records than `split.csv`; the structured preprocessing report makes the exact stage and names observable. Training validates only identifiers, split fields, and columns selected by configured experiments.
 
 ## Cache and Rerun Behavior
 
-Every intermediate is keyed only by image filename. If an expected output exists, preprocessing normally reuses it without checking:
+Every detection JSON, rotated image, depth array, segmentation mask, blackout image, and context response has a sidecar manifest. The signature includes source-image content and all relevant checkpoint identities, stage parameters, class ordering, prompts, remote model identifiers, and implementation-version values. A missing or mismatched manifest invalidates the cached artifact.
 
-- Source image contents or modification time.
-- Checkpoint identity.
-- Detector class order.
-- Rotation setting.
-- Context prompt or remote model version.
-- Preprocessing implementation version.
+Embedding caches apply the same principle to the ordered image-name and content manifest plus backbone/revision metadata. There is no force or clean mode, and old unreferenced artifacts are not deleted automatically.
 
-There is no force, clean, or cache-manifest option. A failed run can leave a mix of new and old intermediates while preserving the previous final `processed.csv`. A later successful run can also leave orphaned artifacts for rows no longer present.
+## Failure Behavior
 
-Remove only the affected generated directories when deliberately changing inputs or models. Preserve the dataset split unless a new experimental partition is intended.
+Per-image failures are logged and represented as row attrition; `preprocessing_report.json` identifies the stage and dropped names. Required split-contract violations fail before a model is constructed. The final CSV and report are published only after the selected stage list succeeds.
 
-## Current Known Limitations
-
-These behaviors are documented but intentionally not changed by the documentation update:
-
-- The detector result dimensions are assigned to `Image_w` and `Image_h` in reverse order. Relative width and relative height therefore use swapped denominators; the relative area denominator remains equivalent.
-- The depth extraction assignment overwrites head depth with tail depth and stores tail depth as both gradient fields rather than a head-to-tail difference.
-- Missing depth weights do not currently reach the intended automatic download because the warning path references the model path before it is assigned. Provide the checkpoint explicitly.
-- Context generation emits `lighting_condition`, while feature encoding currently searches for `lightning_condition`. Newly generated lighting categories are therefore not converted to dummy columns by that stage; older cached artifacts may already contain legacy dummy columns.
-- Blackout failures do not remove rows immediately. A later CNN run can fail if `processed.csv` references an image that was not written.
-- A partial original-image context cache can cause uncached rows to be removed after the join. When no context entries are available, no context columns are added.
-
-Cached original-image context being reused for rotated geometry is intended behavior, not a limitation.
+Original-image context remains deliberately separate from aligned geometry. With rotation enabled, valid cached context can be reused, while uncached remote calls remain disabled. This preserves scene information from the source photograph without describing the rotated crop as a new scene.
 
 ## Downstream Contract
 

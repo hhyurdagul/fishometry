@@ -1,107 +1,142 @@
-"""Image path resolution and processing utilities."""
+"""Safe image path resolution and display preparation."""
 
-import os
+from pathlib import Path, PurePosixPath
+
 import cv2
 import numpy as np
 
 
-def get_image_paths(dataset, image_name):
-    """Resolve paths for raw, rotated, depth, and blackout images."""
-    # Try finding image in raw or splits
-    found_path = None
-    possible_paths = [
-        f"data/{dataset}/raw/{image_name}",
-        f"data/{dataset}/splits/{image_name}",
-        f"data/{dataset}/{image_name}",
-    ]
-    for p in possible_paths:
-        if os.path.exists(p):
-            found_path = p
-            break
+def _safe_dataset_dir(dataset: str) -> Path:
+    root = Path("data").resolve()
+    candidate = (root / dataset).resolve()
+    if candidate.parent != root or not candidate.is_dir():
+        raise ValueError(f"Invalid dataset directory: {dataset}")
+    return candidate
 
-    rot_path = f"data/{dataset}/processed/rotated/{image_name}"
 
-    # Depth map (flat layout: processed/depth/<name>.npy, name keeps its extension)
-    depth_path = None
-    p = f"data/{dataset}/processed/depth/{image_name}.npy"
-    if os.path.exists(p):
-        depth_path = p
+def _safe_image_name(image_name: str) -> Path:
+    relative = PurePosixPath(image_name)
+    if (
+        not image_name
+        or relative.is_absolute()
+        or "." in relative.parts
+        or ".." in relative.parts
+    ):
+        raise ValueError(f"Invalid image name: {image_name}")
+    return Path(*relative.parts)
 
-    # Blackout image path
-    blackout_path = f"data/{dataset}/processed/blackout/{image_name}"
-    if not os.path.exists(blackout_path):
-        # Try with different extensions
-        for ext in [".jpg", ".jpeg", ".png"]:
-            alt_path = f"data/{dataset}/processed/blackout/{image_name.replace('.jpg', ext).replace('.jpeg', ext)}"
-            if os.path.exists(alt_path):
-                blackout_path = alt_path
+
+def get_image_paths(dataset: str, image_name: str):
+    """Resolve raw and processed image variants without path traversal."""
+    dataset_dir = _safe_dataset_dir(dataset)
+    relative = _safe_image_name(image_name)
+
+    raw_path = next(
+        (
+            path
+            for path in (
+                dataset_dir / "raw" / relative,
+                dataset_dir / "splits" / relative,
+                dataset_dir / relative,
+            )
+            if path.is_file()
+        ),
+        None,
+    )
+    rotated = dataset_dir / "processed" / "rotated" / relative
+    depth = dataset_dir / "processed" / "depth" / Path(f"{relative}.npy")
+    blackout = dataset_dir / "processed" / "blackout" / relative
+    if not blackout.is_file():
+        for suffix in (".jpg", ".jpeg", ".png"):
+            alternative = blackout.with_suffix(suffix)
+            if alternative.is_file():
+                blackout = alternative
                 break
 
-    return found_path, rot_path, depth_path, blackout_path
+    return (
+        str(raw_path) if raw_path else None,
+        str(rotated),
+        str(depth) if depth.is_file() else None,
+        str(blackout),
+    )
 
 
-def process_images(dataset, image_name, data_row):
-    """Load and process all image variants for display."""
-    raw_path, rot_path, depth_path, blackout_path = get_image_paths(
+def _load_rgb(path: str | None) -> np.ndarray | None:
+    if path is None or not Path(path).is_file():
+        return None
+    image = cv2.imread(path)
+    if image is None:
+        return None
+    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+
+def process_images(dataset: str, image_name: str, data_row: dict | None):
+    """Load readable image variants and annotate rotated detections."""
+    raw_path, rotated_path, depth_path, blackout_path = get_image_paths(
         dataset, image_name
     )
 
-    # Raw image
-    img_raw = None
-    if raw_path and os.path.exists(raw_path):
-        img_raw = cv2.imread(raw_path)
-        img_raw = cv2.cvtColor(img_raw, cv2.COLOR_BGR2RGB)
-    else:
-        img_raw = np.zeros((200, 200, 3), dtype=np.uint8)  # Placeholder
+    image_raw = _load_rgb(raw_path)
+    if image_raw is None:
+        image_raw = np.zeros((200, 200, 3), dtype=np.uint8)
 
-    # Rotated image with annotations
-    img_rot = None
-    if os.path.exists(rot_path):
-        img_rot = cv2.imread(rot_path)
-        img_rot = cv2.cvtColor(img_rot, cv2.COLOR_BGR2RGB)
+    image_rotated = _load_rgb(rotated_path)
+    if image_rotated is not None and data_row:
+        if data_row.get("Fish_x1") is not None:
+            point_1 = (
+                int(data_row["Fish_x1"]),
+                int(data_row["Fish_y1"]),
+            )
+            point_2 = (
+                int(data_row["Fish_x2"]),
+                int(data_row["Fish_y2"]),
+            )
+            cv2.rectangle(image_rotated, point_1, point_2, (0, 120, 255), 2)
+            cv2.putText(
+                image_rotated,
+                "Fish",
+                point_1,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 120, 255),
+                2,
+            )
+        if data_row.get("Head_x1") is not None:
+            center = (
+                int((data_row["Head_x1"] + data_row["Head_x2"]) / 2),
+                int((data_row["Head_y1"] + data_row["Head_y2"]) / 2),
+            )
+            cv2.circle(image_rotated, center, 5, (255, 0, 0), -1)
+        if data_row.get("Tail_x1") is not None:
+            center = (
+                int((data_row["Tail_x1"] + data_row["Tail_x2"]) / 2),
+                int((data_row["Tail_y1"] + data_row["Tail_y2"]) / 2),
+            )
+            cv2.circle(image_rotated, center, 5, (0, 255, 0), -1)
 
-        if data_row:
-            # Fish BBox
-            if "Fish_x1" in data_row and data_row["Fish_x1"] is not None:
-                pt1 = (int(data_row["Fish_x1"]), int(data_row["Fish_y1"]))
-                pt2 = (int(data_row["Fish_x2"]), int(data_row["Fish_y2"]))
-                cv2.rectangle(img_rot, pt1, pt2, (0, 120, 255), 2)
-                cv2.putText(
-                    img_rot,
-                    "Fish",
-                    pt1,
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 120, 255),
-                    2,
+    image_depth = None
+    if depth_path:
+        try:
+            depth = np.load(depth_path, allow_pickle=False)
+            if depth.ndim == 2 and np.isfinite(depth).all():
+                normalized = cv2.normalize(
+                    depth,
+                    np.empty_like(depth),
+                    0,
+                    255,
+                    cv2.NORM_MINMAX,
+                    dtype=cv2.CV_8U,
                 )
+                image_depth = cv2.cvtColor(
+                    cv2.applyColorMap(normalized, cv2.COLORMAP_MAGMA),
+                    cv2.COLOR_BGR2RGB,
+                )
+        except (OSError, ValueError):
+            image_depth = None
 
-            # Head center
-            if "Head_x1" in data_row and data_row["Head_x1"] is not None:
-                cx = int((data_row["Head_x1"] + data_row["Head_x2"]) / 2)
-                cy = int((data_row["Head_y1"] + data_row["Head_y2"]) / 2)
-                cv2.circle(img_rot, (cx, cy), 5, (255, 0, 0), -1)
-
-            # Tail center
-            if "Tail_x1" in data_row and data_row["Tail_x1"] is not None:
-                cx = int((data_row["Tail_x1"] + data_row["Tail_x2"]) / 2)
-                cy = int((data_row["Tail_y1"] + data_row["Tail_y2"]) / 2)
-                cv2.circle(img_rot, (cx, cy), 5, (0, 255, 0), -1)
-
-    # Depth map
-    img_depth = None
-    if depth_path and os.path.exists(depth_path):
-        depth = np.load(depth_path)
-        norm_depth = cv2.normalize(
-            depth, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U
-        )
-        img_depth = cv2.applyColorMap(norm_depth, cv2.COLORMAP_MAGMA)
-        img_depth = cv2.cvtColor(img_depth, cv2.COLOR_BGR2RGB)
-
-    # Blackout image
-    img_blackout = None
-    if blackout_path and os.path.exists(blackout_path):
-        img_blackout = cv2.imread(blackout_path)
-        img_blackout = cv2.cvtColor(img_blackout, cv2.COLOR_BGR2RGB)
-
-    return img_raw, img_rot, img_depth, img_blackout
+    return (
+        image_raw,
+        image_rotated,
+        image_depth,
+        _load_rgb(blackout_path),
+    )
