@@ -266,14 +266,17 @@ The isolated image retains color, texture, and fine shape information that engin
 
 ## 13. Original-Scene Context
 
-Outdoor photographs contain scale-related and domain-related cues outside the fish itself. These cues are not measured geometrically. They are read out of the original photograph by a vision-language model, which is asked to answer a fixed set of questions with a fixed set of permitted answers. The pipeline can attach structured context describing:
+Outdoor photographs contain scale-related and domain-related cues outside the fish itself. These cues are not measured geometrically. They are read out of the original photograph by a vision-language model, which is asked to answer a fixed set of questions with a fixed set of permitted answers. The context vocabulary matches the 27 annotated fields in the outdoor raw table:
 
-- Whether the background extends into distant scenery or is a nearby surface.
-- Whether other objects are visible.
-- Whether the fish is in or on a net.
-- The surface or situation in which the fish is positioned.
-- The fish's original direction within the frame.
-- The lighting condition.
+- Human holding method, hand/body visibility, and fish curvature.
+- Fish orientation, view angle, completeness, and state.
+- Measuring devices, nets, fishing gear, containers, and other manufactured objects.
+- Background, water visibility, environment, background depth, and lighting.
+- Reflections, image quality, number of fish, and multiple-fish presence.
+
+The raw annotations define the permitted vocabulary; the context stage predicts
+its own values from each original image. Booleans and counts are numeric, and
+categorical values are one-hot encoded.
 
 These values are extracted from the original photograph because rotation is an analytical transformation, not the scene in which the photograph was captured.
 
@@ -331,8 +334,8 @@ The rich outdoor bundle combines:
 - Relative coordinate features.
 - Segmentation area, perimeter, axes, and solidity.
 - Background-depth category.
-- Indicators for other objects and fishnet presence.
-- Encoded placement, orientation, and available scene categories.
+- All boolean context indicators and the visible-fish count.
+- One-hot encodings of all categorical context fields, including background depth.
 
 This bundle does not include eye measurements. It is available only for outdoor data because that experiment family is designed to study uncontrolled scenes and fish-type variation.
 

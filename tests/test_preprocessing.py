@@ -17,7 +17,13 @@ from src.preprocessing.steps.feature import FeatureStep
 from src.preprocessing.steps.rotate import RotateStep
 from src.preprocessing.steps.segment import SegmentStep
 from src.preprocessing.steps.utils import get_center_coord
-from src.preprocessing.steps.vlm import MODEL_NAME, VLM_FEATURE_COLUMNS, VLMStep
+from src.preprocessing.steps.vlm import (
+    MODEL_NAME,
+    VLM_FEATURE_COLUMNS,
+    VLM_SCHEMA,
+    VLM_PROMPT,
+    VLMStep,
+)
 from src.preprocessing.steps.yolo import YoloStep
 from src.preprocessing.run import run_pipeline as run_preprocessing_pipeline
 
@@ -176,14 +182,19 @@ class FeatureTests(unittest.TestCase):
     def test_vlm_categorical_encoding(self) -> None:
         config = _dataset_config(Path("."), fish_type=False)
         df = self._base_df().with_columns(
-            background_depth=pl.Series(["far", "close"]),
-            has_other_objects=pl.Series([True, False]),
-            is_in_fishnet=pl.Series([False, True]),
+            background_depth=pl.Series(["far_horizon", "medium_ground"]),
+            has_other_manmade_objects=pl.Series([True, False]),
+            has_fishnet=pl.Series([False, True]),
+            num_fish=pl.Series([1, 3]),
+            fish_orientation=pl.Series(["diagonal_up", "vertical_head_down"]),
         )
         out = FeatureStep(config).process(df)
-        self.assertEqual(out["background_depth"].to_list(), [1, 0])
-        self.assertEqual(out["has_other_objects"].to_list(), [1, 0])
-        self.assertEqual(out["is_in_fishnet"].to_list(), [0, 1])
+        self.assertEqual(out["background_depth_far_horizon"].to_list(), [1, 0])
+        self.assertEqual(out["background_depth_medium_ground"].to_list(), [0, 1])
+        self.assertEqual(out["has_other_manmade_objects"].to_list(), [1, 0])
+        self.assertEqual(out["has_fishnet"].to_list(), [0, 1])
+        self.assertEqual(out["num_fish"].to_list(), [1, 3])
+        self.assertEqual(out["fish_orientation_diagonal_up"].to_list(), [1, 0])
 
     def test_fish_type_one_hot(self) -> None:
         config = _dataset_config(Path("."), fish_type=True)
@@ -268,15 +279,17 @@ class CachedReadTests(unittest.TestCase):
             image = root / "image.png"
             image.write_bytes(b"image")
             out = root / "a.json"
-            payload = {"name": "a", "background_depth": "far"}
+            payload = {"name": "a", "background_depth": "far_horizon"}
             out.write_text(json.dumps(payload), encoding="utf-8")
             signature = build_signature(
                 inputs={"image": image},
                 parameters={
                     "step": "vlm",
-                    "version": 1,
+                    "version": 2,
                     "model": MODEL_NAME,
                     "feature_columns": VLM_FEATURE_COLUMNS,
+                    "schema": VLM_SCHEMA,
+                    "prompt": VLM_PROMPT,
                 },
             )
             write_manifest(out, signature)

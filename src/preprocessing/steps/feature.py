@@ -1,6 +1,11 @@
 import polars as pl
 
 from src.config import Config
+from src.context_features import (
+    VLM_BOOLEAN_COLUMNS,
+    VLM_CATEGORICAL_VALUES,
+    VLM_INTEGER_COLUMNS,
+)
 
 
 class FeatureStep:
@@ -15,9 +20,8 @@ class FeatureStep:
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         print("Count:", len(df))
-        df = (
-            df.pipe(self._create_geometric_features)
-            .pipe(self._one_hot_encode_fish_type)
+        df = df.pipe(self._create_geometric_features).pipe(
+            self._one_hot_encode_fish_type
         )
         if self.encode_vlm_features:
             df = self._encode_vlm_features_if_available(df)
@@ -41,26 +45,15 @@ class FeatureStep:
         return df
 
     def _encode_vlm_features_if_available(self, df: pl.DataFrame) -> pl.DataFrame:
-        expr = []
-        columns = df.columns
-        if "background_depth" in columns:
-            expr.append(
-                pl.col("background_depth")
-                .replace_strict({"far": 1, "close": 0})
-                .cast(int)
-            )
-        if "has_other_objects" in columns:
-            expr.append(pl.col("has_other_objects").cast(int))
-        if "is_in_fishnet" in columns:
-            expr.append(pl.col("is_in_fishnet").cast(int))
-
-        dummies = list(
-            filter(
-                lambda x: x in columns,
-                ["fish_placement", "fish_orientation", "lighting_condition"],
-            )
-        )
-        if dummies:
-            df = df.to_dummies(dummies)
-
-        return df.with_columns(expr)
+        numeric_columns = [
+            name
+            for name in VLM_BOOLEAN_COLUMNS + VLM_INTEGER_COLUMNS
+            if name in df.columns
+        ]
+        categorical_columns = [
+            name for name in VLM_CATEGORICAL_VALUES if name in df.columns
+        ]
+        df = df.with_columns(pl.col(numeric_columns).cast(pl.Int64))
+        if categorical_columns:
+            df = df.to_dummies(categorical_columns)
+        return df

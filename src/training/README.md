@@ -78,7 +78,7 @@ Every tabular selection first includes all columns whose names start with `fish_
 | --- | --- |
 | `eye` | Eye width and height plus detected fish width and height |
 | `coords` | Relative fish width, relative fish height, relative area, fish aspect ratio, and fish area |
-| `features` | All `coords` values; mask area, perimeter, major axis, minor axis, and solidity; background depth; other-object and fishnet flags; and every one-hot placement, orientation, and lighting-condition column |
+| `features` | All `coords` inputs; `mask_area`, `mask_perimeter`, `major_axis`, `minor_axis`, `solidity`; all boolean context fields and `num_fish`; and dummy columns for every categorical context field declared in `src/context_features.py` |
 
 When the depth value is `true`, five values are appended to the chosen set: head, body, and tail depth plus raw and absolute depth-gradient values. This flag adds tabular features; it does not select a different image backbone or depth-estimation checkpoint.
 

@@ -15,74 +15,24 @@ from src.artifacts import (
     write_manifest,
 )
 from src.config import Config
+from src.context_features import VLM_FEATURE_COLUMNS, VLM_SCHEMA
 from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES
 
 MODEL_NAME = "gemma-4-31b-it"
-VLM_FEATURE_COLUMNS = [
-    "background_depth",
-    "has_other_objects",
-    "is_in_fishnet",
-    "fish_placement",
-    "fish_orientation",
-    "lighting_condition",
-]
+VLM_PROMPT = (
+    "Analyze the original image and describe the primary fish and its scene using "
+    "every field in the response schema. Use only the allowed category values. "
+    "Describe actual visibility, truncation, occlusion, curvature, and view angle; "
+    "do not assume the fish is fully visible. Orientation is relative to the original "
+    "image frame. Count all visible fish in num_fish and set is_multiple_fish "
+    "accordingly. Use none for absent holding methods, measuring devices, or nets."
+)
 
 
 class VLM:
     def __init__(self) -> None:
-        schema = {
-            "type": "OBJECT",
-            "properties": {
-                "background_depth": {
-                    "type": "STRING",
-                    "enum": ["far", "close"],
-                    "description": "Far: horizon/scenery. Close: ground/mat/structure.",
-                },
-                "has_other_objects": {
-                    "type": "BOOLEAN",
-                    "description": "True if any non-fish/non-net objects like lures, gear, or buckets are present.",
-                },
-                "is_in_fishnet": {
-                    "type": "BOOLEAN",
-                    "description": "True if the fish is resting on or inside a net.",
-                },
-                "fish_placement": {
-                    "type": "STRING",
-                    "enum": [
-                        "held_by_person",
-                        "grass_greenery",
-                        "beach_sand",
-                        "rocks",
-                        "board_mat_ruler",
-                        "hanging_structure",
-                        "water_surface_level",
-                    ],
-                    "description": "The primary surface or context where the fish is positioned.",
-                },
-                "fish_orientation": {
-                    "type": "STRING",
-                    "enum": [
-                        "top_to_bottom",
-                        "bottom_to_top",
-                        "left_to_right",
-                        "right_to_left",
-                    ],
-                    "description": "The direction the fish's head is pointing relative to the image frame.",
-                },
-                "lighting_condition": {
-                    "type": "STRING",
-                    "enum": [
-                        "bright_daylight",
-                        "overcast",
-                        "low_light",
-                        "artificial_flash",
-                    ],
-                },
-            },
-        }
-
         self.model_config = types.GenerateContentConfig(
-            response_mime_type="application/json", response_schema=schema
+            response_mime_type="application/json", response_schema=VLM_SCHEMA
         )
         with open(".env.json", "r") as f:
             api_key = json.load(f)["GEMINI_API_KEY"]
@@ -94,8 +44,7 @@ class VLM:
         response = self.client.models.generate_content(
             model=MODEL_NAME,
             contents=[
-                "Analyze the image. Determine the fish's orientation and placement. "
-                "The fish is always fully visible. Be precise about the placement category.",
+                VLM_PROMPT,
                 image,
             ],
             config=self.model_config,
@@ -115,7 +64,7 @@ class VLMStep:
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         result = self._process_images(df)
-        return result.drop_nulls(VLM_FEATURE_COLUMNS)
+        return result if result.is_empty() else result.drop_nulls(VLM_FEATURE_COLUMNS)
 
     def _get_features(
         self, name: str, image_path: Path, output_path: Path
@@ -124,9 +73,11 @@ class VLMStep:
             inputs={"image": image_path},
             parameters={
                 "step": "vlm",
-                "version": 1,
+                "version": 2,
                 "model": MODEL_NAME,
                 "feature_columns": VLM_FEATURE_COLUMNS,
+                "schema": VLM_SCHEMA,
+                "prompt": VLM_PROMPT,
             },
         )
         if cache_matches(output_path, signature):

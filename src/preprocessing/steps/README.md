@@ -130,26 +130,40 @@ The context stage describes the unmodified scene rather than the rotated fish ge
 
 ### Structured fields
 
-| Field | Values or meaning |
+The 27 context fields and allowed categories match the observed vocabulary in
+`data/data-outside/raw.csv`, declared in `src/context_features.py`. Raw annotations
+only define the vocabulary; `VLMStep` still predicts values from the image.
+`name`, `fish_type`, and the target `length` are excluded from the response schema.
+Every context field is required, and partial/occluded fish are supported.
+
+| Field | Values |
 | --- | --- |
-| `background_depth` | `far` for horizon/scenery or `close` for nearby ground, mat, or structure |
-| `has_other_objects` | Whether non-fish and non-net objects such as gear are visible |
-| `is_in_fishnet` | Whether the fish rests on or inside a net |
-| `fish_placement` | Person, greenery, sand, rocks, measuring surface, hanging structure, or water surface |
-| `fish_orientation` | Head direction: top, bottom, left, or right relative to the frame |
-| `lighting_condition` | Bright daylight, overcast, low light, or artificial flash |
+| `holding_method` | `hands_single`, `hands_two`, `lap_or_body`, `lip_gripper_tool`, `none`, `stringer_hang` |
+| `curvature_degree` | `moderate_curve`, `slight_curve`, `straight` |
+| `fish_orientation` | `diagonal_down`, `diagonal_up`, `horizontal_left_to_right`, `horizontal_right_to_left`, `vertical_head_down`, `vertical_head_up` |
+| `fish_view_angle` | `dorsal_top`, `head_on`, `lateral_profile`, `three_quarter_oblique`, `ventral_bottom` |
+| `fish_completeness` | `full_body`, `head_truncated`, `partially_occluded`, `tail_truncated` |
+| `fish_state` | `alive_fresh`, `dead`, `gutted_or_filleted` |
+| `measure_tape_type` | `bump_board`, `measuring_tape`, `none`, `ruler` |
+| `fishnet_type` | `keepnet`, `landing_net`, `none` |
+| `background_category` | `boat_deck`, `concrete_dock`, `grass_vegetation`, `indoor_surface`, `rocks_gravel`, `sand_beach`, `soil_mud_dirt`, `water_freshwater`, `water_sea`, `wood_board_mat` |
+| `environment_type` | `boat_marine`, `dock_pier`, `indoor`, `natural_outdoor` |
+| `background_depth` | `close_surface`, `far_horizon`, `medium_ground` |
+| `lighting_condition` | `bright_direct_sunlight`, `diffuse_overcast`, `indoor_light`, `low_light_shadow`, `night_flash` |
+| `image_quality` | `mild_blur`, `overexposed`, `sharp_clear`, `underexposed` |
+| `num_fish` | Positive integer count of visible fish |
+
+Boolean fields: `is_held_by_human`, `human_hand_visible`, `human_body_visible`, `is_curled`, `has_measure_tape`, `has_fishnet`, `has_fishing_rod_reel`, `has_lure_or_hook`, `has_bucket_or_container`, `has_other_manmade_objects`, `water_visible`, `glare_or_wet_reflections`, `is_multiple_fish`.
 
 The stage reads `GEMINI_API_KEY` from `.env.json` during construction. Each uncached request is rate-spaced by five seconds and must return JSON conforming to the declared schema.
 
-### Rotation and cache order
+### Cache and image source
 
-The cache path is `processed/cache/vlm/<name>.json`. Its sidecar manifest covers the source image, prompt schema, remote model identifier, and feature schema:
-
-- A matching original-image response is joined regardless of rotation.
-- With rotation enabled, an uncached image receives no remote request and no new context row.
-- With rotation disabled, an uncached raw image is submitted and its response and manifest are cached.
-
-This allows source-scene features to remain attached to geometry measured after alignment. When `features` is configured, rows without complete context values do not survive this stage.
+The cache path is `processed/cache/vlm/<name>.json`. Its sidecar manifest covers
+the source image, full response schema, prompt, remote model identifier, and step
+version. The new schema invalidates old six-field responses. Matching responses
+are reused; otherwise the original raw image is submitted, regardless of rotation.
+Rows without complete context values do not survive this stage.
 
 ## `feature.py`: Engineered Features
 
@@ -173,11 +187,11 @@ When fish types are enabled, the stage creates `fish_type_<value>` dummy columns
 
 ### Context encoding
 
-- Background depth becomes `far = 1` and `close = 0`.
-- Object and fishnet booleans become integers.
-- Placement, orientation, and lighting condition become dummy columns when present.
-
-Strict category replacement can raise when an unexpected background value is present.
+- All boolean context fields become integers; `num_fish` remains an integer.
+- All categorical fields become dummy columns named `<field>_<value>`, including
+  the three background-depth levels (`close_surface`, `medium_ground`, `far_horizon`).
+- Only context columns present in the input are encoded. Fish species encoding is separate.
+- Training's `features` bundle selects all encoded context fields from the same shared vocabulary.
 
 ## `utils.py`: Coordinate Contract
 

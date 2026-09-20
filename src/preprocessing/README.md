@@ -126,14 +126,17 @@ Depth is monocular relative depth, not a calibrated physical distance.
 
 ### Original-image context
 
-- Background depth category.
-- Whether other objects are visible.
-- Whether the fish is in or on a fishnet.
-- Fish placement category.
-- Fish orientation category.
-- Lighting category.
+The schema contains 27 fields matching the outdoor raw-data vocabulary: human
+holding and visibility, fish curvature/orientation/view/completeness/state,
+measuring devices and fishing equipment, background/environment/depth/lighting,
+reflections, image quality, and fish counts. The raw CSV defines the vocabulary,
+not the values returned by VLM inference. See [steps/README.md](steps/README.md)
+for the exact categories.
 
-Boolean and categorical values are converted into numeric or dummy columns when the expected source columns are available.
+Booleans and fish counts become integers; all categorical context fields become
+dummy columns. The runner override above still disables extraction and encoding.
+Existing processed artifacts must be regenerated with encoding enabled before
+using the updated `features` training bundle.
 
 ### Fish type
 

@@ -6,6 +6,12 @@ This module provides the load_data function used by all training scripts.
 
 import polars as pl
 
+from src.context_features import (
+    VLM_BOOLEAN_COLUMNS,
+    VLM_CATEGORICAL_VALUES,
+    VLM_INTEGER_COLUMNS,
+)
+
 
 def get_feature_names_and_desc(
     model_name: str = "linear",
@@ -49,19 +55,14 @@ def get_feature_names_and_desc(
                     "major_axis",
                     "minor_axis",
                     "solidity",
-                    "background_depth",
-                    "has_other_objects",
-                    "is_in_fishnet",
+                    *VLM_BOOLEAN_COLUMNS,
+                    *VLM_INTEGER_COLUMNS,
                 ]
             )
         )
 
         features.extend(
-            [
-                pl.selectors.starts_with("fish_placement_"),
-                pl.selectors.starts_with("fish_orientation_"),
-                pl.selectors.starts_with("lighting_condition_"),
-            ]
+            [pl.selectors.starts_with(name + "_") for name in VLM_CATEGORICAL_VALUES]
         )
 
     # Depth Features

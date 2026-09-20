@@ -19,7 +19,7 @@ The supported groups are:
 | --- | --- |
 | `eye` | `Eye_w`, `Eye_h`, `Fish_w`, `Fish_h` |
 | `coords` | `relative_w`, `relative_h`, `relative_area`, `fish_aspect`, `fish_area` |
-| `features` | All `coords` inputs; `mask_area`, `mask_perimeter`, `major_axis`, `minor_axis`, `solidity`; `background_depth`, `has_other_objects`, `is_in_fishnet`; and all columns beginning with `fish_placement_`, `fish_orientation_`, and `lighting_condition_` |
+| `features` | All `coords` inputs; `mask_area`, `mask_perimeter`, `major_axis`, `minor_axis`, `solidity`; all boolean context fields and `num_fish`; and dummy columns for every categorical context field declared in `src/context_features.py` |
 | Depth addition | `head_depth`, `body_depth`, `tail_depth`, `depth_gradient_raw`, `depth_gradient_abs` |
 
 An unrecognized group does not raise a feature-specific error. It selects only matching fish-type one-hot columns, if any, which may create a zero-column matrix or an unintended fish-type-only experiment.
