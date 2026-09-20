@@ -1,7 +1,7 @@
 {
   "dataset": {
     "name": "data-inside-zoom",
-    "rotate": true,
+    "rotate": false,
     "fish_type_available": false,
     "feature_sets": ["eye", "coords"],
     "depth": [true, false]

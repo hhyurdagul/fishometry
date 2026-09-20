@@ -254,6 +254,8 @@ These features capture body form more directly than a rectangular box. They can 
 
 The binary mask is retained as an intermediate artifact for reuse and inspection.
 
+To limit accelerator memory use, completed vision stages release their models, and segmentation expands its decoded mask to the source resolution in CPU memory. CUDA memory exhaustion triggers one CPU retry for the affected image before it is treated as a failed segmentation. The prompts, original mask dimensions, and pixel-based geometric features are preserved.
+
 ## 12. Isolated Fish Images
 
 The segmentation mask is applied to the image so all background pixels become black. The visible fish is tightly cropped, resized while preserving aspect ratio, and centered on a fixed square canvas.

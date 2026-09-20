@@ -16,9 +16,18 @@ uv run python -m src.preprocessing.run --dataset-name data-outside
 
 ## Prerequisites
 
+**Temporary runner override:** `run.py` currently comments out the VLM context
+stage and disables VLM feature encoding. No `.env.json` or Gemini key is needed
+for this runner. Raw context annotations are preserved unchanged; geometric and
+fish-type features are still generated. The context behavior described below
+applies when the stage is restored. Context-dependent training may require
+rerunning preprocessing after restoring both extraction and encoding.
+
 The selected config and `data/<dataset>/split.csv` must be valid. Every run requires the configured YOLO and Segment Anything checkpoints plus the raw images named by the split. A configured `true` depth experiment additionally requires the Depth Anything V2 checkpoint and initialized submodule. A configured `features` experiment constructs the context stage and therefore requires `.env.json` containing `GEMINI_API_KEY`.
 
 GPU execution is used automatically when available. CPU execution is possible but depth, segmentation, and neural inference can be slow.
+
+Each detector, depth, and segmentation stage releases its model before the next stage. SAM keeps its encoder and decoder on GPU but expands masks to original image dimensions on CPU to avoid resolution-dependent VRAM spikes. If CUDA still runs out of memory, that image is retried once on CPU; later uncached images try CUDA again. Existing successful masks remain reusable when rerunning preprocessing after a failure.
 
 ## Input Contract
 

@@ -14,7 +14,11 @@ from src.artifacts import (
     write_manifest,
 )
 from src.config import Config
-from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_coord
+from src.preprocessing.steps.utils import (
+    FISH_COORDINATE_FEATURES,
+    clear_unused_gpu_memory,
+    get_center_coord,
+)
 
 # V2 repo path
 v2_path = "third_party/Depth-Anything-V2"
@@ -59,6 +63,12 @@ class DepthModel:
         model.eval()
         return model
 
+    def release(self) -> None:
+        if self.model_initialized:
+            del self.model
+            self.model_initialized = False
+            clear_unused_gpu_memory()
+
     def get_depth_map(self, image: np.ndarray) -> np.ndarray:
         if not self.model_initialized:
             # To kill the overhead of loading the model if all the images are cached
@@ -91,7 +101,10 @@ class DepthStep:
         self.depth_model = DepthModel(config.model_path.depth)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return self._process_images(df)
+        try:
+            return self._process_images(df)
+        finally:
+            self.depth_model.release()
 
     def _get_depth_map(self, image_path: Path, output_path: Path) -> np.ndarray:
         signature = build_signature(

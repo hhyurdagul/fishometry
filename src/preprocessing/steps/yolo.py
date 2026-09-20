@@ -14,6 +14,7 @@ from src.artifacts import (
     write_manifest,
 )
 from src.config import Config
+from src.preprocessing.steps.utils import clear_unused_gpu_memory
 
 
 class YoloModel:
@@ -27,6 +28,12 @@ class YoloModel:
 
     def _get_yolo_model(self) -> YOLO:
         return YOLO(self.model_path)
+
+    def release(self) -> None:
+        if self.model_initialized:
+            del self.model
+            self.model_initialized = False
+            clear_unused_gpu_memory()
 
     def predict(
         self, image_path: Path
@@ -74,7 +81,10 @@ class YoloStep:
         self.yolo_model = YoloModel(config.model_path.yolo)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return self._process_images(df)
+        try:
+            return self._process_images(df)
+        finally:
+            self.yolo_model.release()
 
     def _get_xxyywh(self, label: str, box: Boxes):
         x1, y1, x2, y2 = box.xyxy[0].int().tolist()

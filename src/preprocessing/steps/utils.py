@@ -1,3 +1,15 @@
+import gc
+
+import torch
+
+
+def clear_unused_gpu_memory() -> None:
+    """Collect model reference cycles before returning unused CUDA allocations."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 FISH_COORDINATE_FEATURES = [
     "name",
     "Head_x1",

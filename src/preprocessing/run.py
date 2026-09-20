@@ -27,7 +27,7 @@ from src.preprocessing.steps.depth import DepthStep
 from src.preprocessing.steps.feature import FeatureStep
 from src.preprocessing.steps.rotate import RotateStep
 from src.preprocessing.steps.segment import SegmentStep
-from src.preprocessing.steps.vlm import VLMStep
+# from src.preprocessing.steps.vlm import VLMStep
 from src.preprocessing.steps.yolo import YoloStep
 
 app = typer.Typer(add_completion=False, help="Run the preprocessing pipeline.")
@@ -63,15 +63,16 @@ def _validate_split(df: pl.DataFrame, config: Config) -> None:
 def _pipeline_steps(config: Config) -> list[PipelineStep]:
     steps: list[PipelineStep] = [
         YoloStep(config, initial=True),
-        RotateStep(config),
-        YoloStep(config),
+        # RotateStep(config),
+        # YoloStep(config),
     ]
     if any(config.dataset.depth):
         steps.append(DepthStep(config))
     steps.extend([SegmentStep(config), BlackoutStep(config)])
-    if "features" in config.dataset.feature_sets:
-        steps.append(VLMStep(config))
-    steps.append(FeatureStep(config))
+    # Temporarily disabled.
+    # if "features" in config.dataset.feature_sets:
+    #     steps.append(VLMStep(config))
+    steps.append(FeatureStep(config, encode_vlm_features=False))
     return steps
 
 

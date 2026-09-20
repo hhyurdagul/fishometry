@@ -14,7 +14,11 @@ from src.artifacts import (
     write_manifest,
 )
 from src.config import Config
-from src.preprocessing.steps.utils import FISH_COORDINATE_FEATURES, get_center_coord
+from src.preprocessing.steps.utils import (
+    FISH_COORDINATE_FEATURES,
+    clear_unused_gpu_memory,
+    get_center_coord,
+)
 
 
 class SegmentModel:
@@ -29,8 +33,45 @@ class SegmentModel:
 
     def _get_segmentation_model(self) -> SamPredictor:
         sam = sam_model_registry["vit_l"](checkpoint=self.model_path)
-        sam.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         return SamPredictor(sam)
+
+    def release(self) -> None:
+        if self.model_initialized:
+            del self.model
+            self.model_initialized = False
+            clear_unused_gpu_memory()
+
+    @torch.no_grad()
+    def _predict_mask(
+        self,
+        image: np.ndarray,
+        points: np.ndarray,
+        labels: np.ndarray,
+        device: torch.device,
+    ) -> np.ndarray:
+        predictor = self.model
+        predictor.model.to(device)
+        predictor.set_image(image)
+
+        # Match SamPredictor's point-prompt inference, but expand the small
+        # decoder logits on CPU. Original-resolution masks can exhaust VRAM.
+        coords = predictor.transform.apply_coords(points, predictor.original_size)
+        point_coords = torch.as_tensor(coords, dtype=torch.float, device=device)[None]
+        point_labels = torch.as_tensor(labels, dtype=torch.int, device=device)[None]
+        sparse, dense = predictor.model.prompt_encoder(
+            points=(point_coords, point_labels), boxes=None, masks=None
+        )
+        low_res_masks, _ = predictor.model.mask_decoder(
+            image_embeddings=predictor.features,
+            image_pe=predictor.model.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse,
+            dense_prompt_embeddings=dense,
+            multimask_output=False,
+        )
+        masks = predictor.model.postprocess_masks(
+            low_res_masks.cpu(), predictor.input_size, predictor.original_size
+        )
+        return (masks[0, 0] > predictor.model.mask_threshold).numpy()
 
     def get_mask(
         self, image: np.ndarray, points: np.ndarray, labels: np.ndarray
@@ -39,15 +80,23 @@ class SegmentModel:
             self.model = self._get_segmentation_model()
             self.model_initialized = True
 
-        self.model.set_image(image)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            try:
+                return self._predict_mask(image, points, labels, device)
+            except torch.cuda.OutOfMemoryError:
+                if device.type != "cuda":
+                    raise
+                print("SAM CUDA memory exhausted; retrying this image on CPU.")
 
-        masks, _, _ = self.model.predict(
-            point_coords=points,
-            point_labels=labels,
-            box=None,
-            multimask_output=False,
-        )
-        return masks[0]
+            # Leave the exception handler first so its traceback no longer
+            # holds failed CUDA intermediates alive during the retry.
+            self.model.reset_image()
+            self.model.model.to(torch.device("cpu"))
+            clear_unused_gpu_memory()
+            return self._predict_mask(image, points, labels, torch.device("cpu"))
+        finally:
+            self.model.reset_image()
 
 
 class SegmentStep:
@@ -64,7 +113,10 @@ class SegmentStep:
         self.segment_model = SegmentModel(config.model_path.sam)
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
-        return self._process_images(df)
+        try:
+            return self._process_images(df)
+        finally:
+            self.segment_model.release()
 
     def _get_segment_mask(
         self, data: dict, image_path: Path, output_path: Path

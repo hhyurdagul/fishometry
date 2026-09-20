@@ -4,8 +4,9 @@ from src.config import Config
 
 
 class FeatureStep:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, *, encode_vlm_features: bool = True):
         self.config = config
+        self.encode_vlm_features = encode_vlm_features
         self.input_dir = (
             config.dataset.output_dir / "rotated"
             if config.dataset.rotate
@@ -14,11 +15,13 @@ class FeatureStep:
 
     def process(self, df: pl.DataFrame) -> pl.DataFrame:
         print("Count:", len(df))
-        return (
+        df = (
             df.pipe(self._create_geometric_features)
             .pipe(self._one_hot_encode_fish_type)
-            .pipe(self._encode_vlm_features_if_available)
         )
+        if self.encode_vlm_features:
+            df = self._encode_vlm_features_if_available(df)
+        return df
 
     def _create_geometric_features(self, df: pl.DataFrame) -> pl.DataFrame:
         return df.with_columns(

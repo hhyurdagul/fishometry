@@ -11,6 +11,8 @@ Final detection, depth, segmentation, and blackout creation use:
 
 Initial detection and original-image context always refer to raw images. Image name is the join and cache key throughout.
 
+YOLO, depth, and SAM release their loaded models when their respective stage finishes, including on failure. Reference cycles are collected before unused CUDA memory is returned, so earlier stages do not compete with segmentation for GPU capacity.
+
 ## `yolo.py`: Detection
 
 ### Model loading
@@ -87,9 +89,13 @@ Any image or metric error is logged, and null removal over these five required o
 - Loads Segment Anything ViT-L lazily from the configured checkpoint.
 - Uses the final head and tail centers as two positive point prompts.
 - Requests one mask rather than multiple candidates.
+- Runs the image encoder and prompt/mask decoder on CUDA when available; expands and thresholds the low-resolution mask on CPU at the original image dimensions. Point coordinates and geometric feature units remain unchanged.
+- Clears the per-image embedding after every attempt. A CUDA out-of-memory error retries the same image once on CPU after releasing its CUDA state; the next uncached image attempts CUDA again. CPU retries can be substantially slower and still require enough system RAM.
 - Saves the binary result at `processed/segment/<name>.npy`.
 
 Existing masks are reused only when the source image, SAM checkpoint, prompt coordinates, and step version match the sidecar manifest.
+
+After an earlier CUDA failure, rerun the normal preprocessing command using the existing split and caches. Successful masks remain reusable; images without a valid cached mask are retried. Only an unsuccessful CPU retry follows the normal per-image error/drop behavior.
 
 ### Geometric features
 
@@ -185,3 +191,11 @@ The shared coordinate selection requires image name and all four box boundaries 
 - Artifacts are reused only when content-aware manifests match; unreferenced historical artifacts are reported but not pruned automatically.
 
 See the parent [preprocessing README](../README.md) for the full run contract and downstream handoff.
+
+## Temporary context-stage override
+
+The preprocessing runner currently skips `VLMStep` and passes
+`encode_vlm_features=False` to `FeatureStep`. This preserves raw context columns
+without interpreting their categories as VLM output, and removes the runner's
+Gemini credential requirement. `FeatureStep` still defaults to encoding VLM
+features for other callers. Restore both extraction and encoding together.
