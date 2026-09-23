@@ -1,7 +1,7 @@
 {
   "dataset": {
     "name": "data-outside",
-    "rotate": true,
+    "rotate": false,
     "fish_type_available": true,
     "feature_sets": ["coords", "features"],
     "depth": [true, false]

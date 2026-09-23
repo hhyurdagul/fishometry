@@ -149,6 +149,12 @@ Processed and prediction row counts can be smaller than split row counts. Detect
 
 Every reusable preprocessing and embedding artifact has a sidecar or companion manifest covering ordered image identities and content hashes plus relevant checkpoint, parameter, prompt, model-revision, and feature-schema values. A mismatch recomputes the artifact instead of silently reusing it.
 
+Within one process, a bounded digest cache reuses SHA256 values while the resolved
+file's device, inode, size, and nanosecond modification/change times are unchanged.
+This avoids rereading large model checkpoints for every image. Each new process
+hashes inputs again; existing artifact manifests and cached results stay compatible.
+Cached depth arrays and masks still need to be read to extract their features.
+
 There is no force or clean mode. Orphaned artifacts from older inputs are reported or left in place rather than pruned automatically; immutable training run directories preserve complete historical fits. Keep the persisted split stable when comparing experiments.
 
 ## Result Interpretation

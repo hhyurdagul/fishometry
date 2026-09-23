@@ -52,7 +52,7 @@ SPECIES_BLEND = 0.85
 DINO_REPOSITORY = "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8"
 
 # (hub model, image source, square input size, framing). DINOv2 uses 14px
-# patches, so the sizes are multiples of 14. The rotated views keep the scene
+# patches, so the sizes are multiples of 14. The rotated or raw views keep the scene
 # context; the blackout view sees the isolated fish only and adds a different
 # kind of error, which is why it earns a place in the concatenation.
 VIEWS: tuple[tuple[str, str, int, str], ...] = (
@@ -66,6 +66,14 @@ VIEWS: tuple[tuple[str, str, int, str], ...] = (
     ("dinov2_vitl14", "rotated", 448, "squash"),
     ("dinov2_vitl14", "rotated", 448, "crop"),
 )
+
+
+def get_views(rotate: bool = True) -> tuple[tuple[str, str, int, str], ...]:
+    source = "rotated" if rotate else "raw"
+    return tuple(
+        (backbone, source if s == "rotated" else s, size, framing)
+        for backbone, s, size, framing in VIEWS
+    )
 
 EPS = 1e-6
 
@@ -272,11 +280,20 @@ def _view_embeddings(
     processed_dir: Path,
     model_dir: Path,
     view: tuple[str, str, int, str],
+    input_dir: Path | None = None,
 ) -> np.ndarray:
     backbone, source, size, framing = view
-    image_dir = processed_dir / source
+    if source == "raw":
+        if input_dir is not None and input_dir.exists():
+            image_dir = input_dir
+        elif (processed_dir / "raw").exists():
+            image_dir = processed_dir / "raw"
+        else:
+            image_dir = input_dir if input_dir is not None else (processed_dir.parent / "raw")
+    else:
+        image_dir = processed_dir / source
     if not image_dir.exists():
-        raise FileNotFoundError(f"Image directory not found: {image_dir}")
+        raise FileNotFoundError(f"{source.capitalize()} image directory not found: {image_dir}")
     tag = f"{backbone}_{source}_{size}_{framing}"
     cache_path = model_dir / f"dino_{tag}.npy"
     names_path = model_dir / f"dino_{tag}_names.json"
@@ -340,9 +357,14 @@ def train_dino_ridge_model(
     cache_dir.mkdir(parents=True, exist_ok=True)
     processed_dir = config.dataset.output_dir
 
+    rotate = getattr(config.dataset, "rotate", True)
+    views = get_views(rotate)
+    input_dir = getattr(config.dataset, "input_dir", None)
+
     names = df["name"].to_list()
     embeddings = [
-        _view_embeddings(names, processed_dir, cache_dir, view) for view in VIEWS
+        _view_embeddings(names, processed_dir, cache_dir, view, input_dir=input_dir)
+        for view in views
     ]
 
     species_lookup = {
@@ -371,7 +393,7 @@ def train_dino_ridge_model(
             "feature_names": df.select(feature_exprs).columns,
             "species_lookup": species_lookup,
             "image_backbone": "dinov2_multiview",
-            "views": VIEWS,
+            "views": views,
             "dino_repository": DINO_REPOSITORY,
             "derived_features": derived_columns,
             "log_sources": log_sources,

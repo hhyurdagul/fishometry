@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -15,13 +16,32 @@ import numpy as np
 MANIFEST_SCHEMA = 1
 
 
-def file_sha256(path: Path) -> str:
-    """Hash current file bytes for artifact provenance."""
+def _file_identity(path: Path) -> tuple[int, int, int, int, int]:
+    stat = path.stat()
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+@lru_cache(maxsize=4096)
+def _cached_sha256(path: Path, identity: tuple[int, int, int, int, int]) -> str:
     digest = hashlib.sha256()
-    with path.resolve().open("rb") as stream:
+    with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
+    if _file_identity(path) != identity:
+        raise OSError(f"File changed while hashing: {path}")
     return digest.hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    """Hash file bytes, reusing unchanged files' digests within this process.
+
+    Every call checks file identity, size, and nanosecond modification/change
+    times. This avoids rereading gigabyte checkpoints for every cached image,
+    while detecting rewrites and atomic replacements, even with restored mtimes.
+    Digests are never persisted between processes; manifests still contain SHA256.
+    """
+    resolved = path.resolve()
+    return _cached_sha256(resolved, _file_identity(resolved))
 
 
 def input_record(path: Path) -> dict[str, str]:

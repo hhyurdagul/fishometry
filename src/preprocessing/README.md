@@ -157,6 +157,14 @@ Unrelated nullable columns do not remove rows. The final `processed.csv` commonl
 
 Every detection JSON, rotated image, depth array, segmentation mask, blackout image, and context response has a sidecar manifest. The signature includes source-image content and all relevant checkpoint identities, stage parameters, class ordering, prompts, remote model identifiers, and implementation-version values. A missing or mismatched manifest invalidates the cached artifact.
 
+SHA256 digests are reused in a bounded in-process cache after checking each file's
+resolved path, device, inode, size, and nanosecond mtime/ctime. Repeated references
+to an unchanged checkpoint therefore read its bytes once, rather than once per
+image. Rewrites and atomic replacements trigger rehashing, and a file changing
+during hashing raises an error without caching that digest. Digests are not saved
+between processes. This optimization leaves the manifest format unchanged and
+does not skip reading cached arrays or extracting their geometric/depth features.
+
 Embedding caches apply the same principle to the ordered image-name and content manifest plus backbone/revision metadata. There is no force or clean mode, and old unreferenced artifacts are not deleted automatically.
 
 ## Failure Behavior

@@ -3,7 +3,7 @@ Image-embedding regression helpers.
 
 This module adds an outside-data model that follows the same dataframe/config
 interface as the existing training helpers. It uses frozen torchvision image
-features from the rotated images plus tabular geometry features, then fits a
+features from the rotated or raw images plus tabular geometry features, then fits a
 per-species Ridge regressor.
 """
 
@@ -91,13 +91,21 @@ def _build_efficientnet_b3():
 def _load_or_create_embeddings(
     df: pl.DataFrame, config: Config, model_dir: Path
 ) -> np.ndarray:
-    image_dir = config.dataset.output_dir / "rotated"
+    rotate = getattr(config.dataset, "rotate", True)
+    image_source = "rotated" if rotate else "raw"
+    image_dir = (
+        config.dataset.output_dir / "rotated"
+        if rotate
+        else getattr(config.dataset, "input_dir", config.dataset.output_dir / "raw")
+    )
     if not image_dir.exists():
-        raise FileNotFoundError(f"Rotated image directory not found: {image_dir}")
+        raise FileNotFoundError(
+            f"{image_source.capitalize()} image directory not found: {image_dir}"
+        )
 
     names = df["name"].to_list()
-    cache_path = model_dir / "efficientnet_b3_rotated_embeddings.npy"
-    names_path = model_dir / "efficientnet_b3_rotated_embeddings_names.json"
+    cache_path = model_dir / f"efficientnet_b3_{image_source}_embeddings.npy"
+    names_path = model_dir / f"efficientnet_b3_{image_source}_embeddings_names.json"
 
     manifest = {
         "schema": 1,
@@ -183,6 +191,9 @@ def train_efficientnet_ridge_model(
     model.fit(x[train_mask], y[train_mask])
     predictions = model.predict(x)
 
+    rotate = getattr(config.dataset, "rotate", True)
+    image_source = "rotated" if rotate else "raw"
+
     model_path = model_dir / (checkpoint_stem(feature_desc, df, per_type) + ".joblib")
     atomic_joblib_dump(
         {
@@ -195,7 +206,7 @@ def train_efficientnet_ridge_model(
             "species_lookup": species_lookup,
             "image_backbone": "efficientnet_b3",
             "image_weights": str(models.EfficientNet_B3_Weights.DEFAULT),
-            "image_source": "rotated",
+            "image_source": image_source,
         },
         model_path,
     )
