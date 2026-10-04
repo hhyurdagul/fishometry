@@ -34,7 +34,8 @@ Run config-driven commands from the repository root because paths are relative t
     "train_ratio": 0.7,
     "val_ratio": 0.15,
     "test_ratio": 0.15,
-    "yolo_classes": ["Head", "Tail", "Eye", "Fish"]
+    "yolo_classes": ["Head", "Tail", "Eye", "Fish"],
+    "yolo_confidence": 0.5
   }
 }
 ```
@@ -76,9 +77,15 @@ Config loading does not verify these files. The relevant preprocessing step rais
 | `train_ratio` | `0.7` | Training count is `floor(group_size * train_ratio)` |
 | `val_ratio` | `0.15` | Validation count is `round(group_size * val_ratio)` |
 | `test_ratio` | `0.15` | Validated as part of the ratio total, but not used directly; test receives every row remaining after train and validation |
-| `yolo_classes` | `Head`, `Tail`, `Fish` | Ordered detector label mapping; the final entry is the fallback label for any class ID not mapped earlier |
+| `yolo_classes` | `Head`, `Tail`, `Fish` | Ordered detector label mapping; the final entry is the default label for any class ID not mapped earlier |
+| `yolo_confidence` | `0.8` | Detector inference cutoff, also recorded in the YOLO cache signature; both indoor configs use `0.5` to recover usable images |
+| `yolo_imgsz` | unset (640) | Detector inference size in pixels; must be a multiple of 32; recorded in the YOLO cache signature when set |
+| `yolo_selection` | `unique` | `unique` rejects repeated labels; `best` keeps the top box per label and requires the landmarks to lie inside the fish box |
 
 Every ratio must be strictly greater than zero and strictly less than one. Their sum may not exceed one. Because test receives the remainder, a sum below one makes the effective test share larger than `test_ratio`.
+The detector confidence must be strictly between zero and one.
+
+The current `data-outside` configuration uses one detector and no fallback: the three-class YOLO11n model (`Head`, `Tail`, `Fish`) at 512 px, confidence 0.20, with `best` selection. These settings were chosen on the validation split only. The selection, held-out results and a reason for every image that still fails are in `reports/detector-single-model-audit-2026-09-24/REPORT.md`; training provenance is in `reports/detector-retrain-2026-09-24/REPORT.md`.
 
 When fish types are enabled, floor/round/remainder calculations are performed independently for every type. Small groups can consequently have an empty validation or test partition.
 

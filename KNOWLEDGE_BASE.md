@@ -1,5 +1,23 @@
 # Fishometry Pipeline Knowledge Base
 
+**Status (25 September 2026).** The data, the pipeline, and all length models are final, and the thesis has been rewritten from them (`Thesis/`, built with the scripts described in `Thesis/BUILD.md`).
+
+- Uncontrolled data: 2,415 photographs of thirteen species after the audit of 24 September 2026 removed 172 of the original 2,587 (`reports/dataset-audit-2026-09-24/REPORT.md`). One YOLO11n Head/Tail/Fish detector with no fallback, run at 512 pixels with the best-box rule at confidence 0.20, passes 2,358 of them (97.6 per cent); each of the 57 losses has a reviewed reason (`reports/detector-single-model-audit-2026-09-24/`).
+- Controlled data: 302 of 302 photographs processed. Zoom-derived data: 889 of 906 observations processed.
+- Headline test results, each configuration chosen by validation MAE: controlled `linear_coords`, MAE 0.124 cm (0.756 per cent); zoom-derived `xgboost_coords_depth`, MAE 0.711 cm (4.091 per cent); uncontrolled `dino_ridge_features`, MAE 5.527 cm (95 per cent interval 5.057 to 6.048 cm), against 8.760 cm for the species average, a reduction of 36.9 per cent.
+
+### Principal findings
+
+These interpretations are established in Chapter 4 of the thesis from the existing predictions (`Thesis/scripts/make_analysis.py` writes the supporting tables):
+
+- With a fixed capture geometry, length estimation is a calibration problem: a linear model on the relative box coordinates is best, and more flexible models are worse.
+- The eye is not a useful scale cue. Its size relative to the body falls by only about 13 per cent over the length range, which is less than the error of measuring a box 7 to 24 pixels wide, and its raw pixel sizes cannot tell apart the two framings of the controlled collection (800 x 600 and 800 x 450 pixels, 0.072 against 0.082 cm per pixel).
+- Magnifying the same fish breaks a calibrated model (linear coordinates rise from 0.756 to 11.899 per cent MAPE). Relative depth helps in all eight zoom-derived pairs because its values change systematically under magnification, which reveals that a photograph was magnified but not by how much. Depth acts as a signature of the capture setup, not as a measurement of distance.
+- In the pooled uncontrolled data, apparent size correlates negatively with length. This is Simpson's paradox: high-resolution sub-collection A consists mostly of short species. Within species the correlation is close to zero.
+- The species average alone reaches R-squared 0.760. The within-species R-squared, which removes the species effect, is 0.563 for the selected model and at most 0.04 for the detected geometry alone.
+- Predictions are pulled towards the species average (slope 0.55 of predicted on true deviation), so unusually small and unusually large fish are estimated least accurately.
+- Visible measuring devices do not explain the result (MAPE 13.75 per cent with a device and 14.11 per cent without), knowing the sub-collection improves the species baseline by only 0.17 cm, and pessimistic assumptions about the lost photographs change the MAE by about 0.2 cm.
+
 ## 1. Purpose
 
 Fishometry studies whether the physical length of a fish can be estimated from a single photograph without placing a ruler, calibration board, or other known-size reference beside the fish.
@@ -84,8 +102,8 @@ The complete information flow is:
 2. Assign source observations to training, validation, and test partitions.
 3. Optionally derive zoom variants while preserving source assignments.
 4. Locate fish body parts and the full fish in each image.
-5. Normalize orientation when alignment is enabled.
-6. Measure the aligned image again.
+5. Normalize orientation when alignment is enabled (disabled in the final configurations; see Section 8).
+6. Measure the aligned image again (only when alignment is enabled).
 7. Estimate relative depth.
 8. Separate the fish from its background.
 9. Create a standardized isolated-fish image.
@@ -187,7 +205,7 @@ The landmark detectors are not off-the-shelf models. Two object detectors were t
 
 Training two detectors rather than one reflects the two capture settings. It is also the reason the eye is available only for controlled data: the outdoor detector has no eye class, so no outdoor eye feature can exist regardless of what an individual photograph shows.
 
-Both were trained for 100 epochs at 640-pixel input with a fixed seed of 0.
+The following table describes the original thesis detectors. Both were trained for 100 epochs at 640-pixel input with a fixed seed of 0.
 
 | Detector | Precision | Recall | mAP@0.5 | mAP@0.5:0.95 | Epochs | Batch size | Input size | Seed |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -203,7 +221,11 @@ Outdoor detection is markedly weaker. Roughly one in seven required landmarks is
 
 Outdoor length errors therefore combine detector error with estimator error, and controlled-versus-outdoor comparisons should not be read as a pure statement about scene difficulty.
 
+The final outdoor configuration uses a single later YOLO11n detector with three classes (Head, Tail, Fish), fine-tuned from COCO weights for 20 epochs at 512 pixels on the clean training photographs of the source collection, with the validation and test photographs of the length experiments withheld and five near-duplicate training photographs removed. On 360 unseen test photographs it reaches precision 97.367, recall 96.164, mAP@0.5 98.069, and mAP@0.5:0.95 75.962. There is no fallback detector. It runs at 512 pixels with the best-box rule at confidence 0.20: the most confident box of each class is kept, and a photograph is accepted only if at least half of the head box and half of the tail box lie inside the selected fish box. The rule and threshold were chosen on the validation photographs by the number of correctly localised minus mislocalised photographs. The stage passes 2,358 of 2,415 photographs; the 57 losses and their reviewed reasons are in `reports/detector-single-model-audit-2026-09-24/` and Appendix G of the thesis. The controlled detector (YOLO11m, 640 pixels, strict one-box-per-class rule at confidence 0.5) passes all 302 controlled photographs.
+
 ## 8. Orientation Normalization
+
+**Status:** implemented and evaluated, but disabled (`"rotate": false`) in every final configuration. It did not improve prediction on any dataset, and depth estimated on a rotated and cropped canvas no longer corresponds to the photographed scene. All final measurements are taken on the original image. The description below documents the stage for reuse.
 
 Fish may appear left-to-right, right-to-left, diagonal, or nearly vertical. Raw width and height are difficult to compare when orientation changes.
 
@@ -283,6 +305,8 @@ These values are extracted from the original photograph because rotation is an a
 Previously obtained context can therefore be reused alongside newly measured aligned geometry. This preserves the intended distinction between scene information and fish-shape information.
 
 Context categories are retained as structured attributes. Numerical context indicators are used when they are available in the processed dataset.
+
+**Final pipeline:** the preprocessing runner does not call the vision-language model and does not encode the categorical fields. The stored annotations of the source table are passed through, and the `features` bundle uses the thirteen yes-or-no fields and `num_fish`. The categorical fields (placement, orientation, view angle, background, lighting, and others) are not used by any final model.
 
 Constraining the model to a closed set of categories keeps the resulting columns comparable across images and directly usable as features. It does not make them observations. Each context value is a judgement about the photograph, produced with no reference to the ground-truth length, and it carries its own error rate. A scene can be labelled with the wrong surface, the wrong lighting, or the wrong background depth, and nothing downstream detects that. Context features should be interpreted as automatic annotation of the scene rather than as measurement of it.
 

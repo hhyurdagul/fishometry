@@ -1,4 +1,6 @@
 from pathlib import Path
+from typing import Literal
+
 from pydantic import BaseModel, computed_field, model_validator, field_validator
 
 import json
@@ -18,12 +20,26 @@ class ParamConfig(BaseModel):
     val_ratio: float = 0.15
     test_ratio: float = 0.15
     yolo_classes: list[str] = ["Head", "Tail", "Fish"]  # Last one accepted as default
+    yolo_confidence: float = 0.8
+    # None keeps the Ultralytics default inference size (640 px).
+    yolo_imgsz: int | None = None
+    # "unique": reject an image when any semantic class is detected more than once.
+    # "best": keep the highest-confidence box per semantic class and require every
+    #         landmark box to lie mostly inside the selected whole-fish box.
+    yolo_selection: Literal["unique", "best"] = "unique"
 
-    @field_validator("train_ratio", "val_ratio", "test_ratio")
+    @field_validator("train_ratio", "val_ratio", "test_ratio", "yolo_confidence")
     @classmethod
     def check_range(cls, v):
         if not 0.0 < v < 1.0:
             raise ValueError("Value must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("yolo_imgsz")
+    @classmethod
+    def check_imgsz(cls, v):
+        if v is not None and (v <= 0 or v % 32):
+            raise ValueError("yolo_imgsz must be a positive multiple of 32")
         return v
 
     @model_validator(mode="after")

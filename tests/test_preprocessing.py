@@ -24,7 +24,7 @@ from src.preprocessing.steps.vlm import (
     VLM_PROMPT,
     VLMStep,
 )
-from src.preprocessing.steps.yolo import YoloStep
+from src.preprocessing.steps.yolo import YoloModel, YoloStep, select_boxes
 from src.preprocessing.run import run_pipeline as run_preprocessing_pipeline
 
 
@@ -242,6 +242,61 @@ class SegmentFeatureTests(unittest.TestCase):
 
 
 class CachedReadTests(unittest.TestCase):
+    def test_yolo_unique_selection_rejects_repeated_semantic_class(self) -> None:
+        def box(class_id, conf=0.9, xyxy=(0, 0, 10, 10)):
+            return types.SimpleNamespace(
+                cls=types.SimpleNamespace(item=lambda: class_id),
+                conf=types.SimpleNamespace(item=lambda: conf),
+                xyxy=[types.SimpleNamespace(tolist=lambda: list(xyxy))],
+            )
+        classes = ["Head", "Tail", "Fish"]
+        self.assertIsNotNone(select_boxes([box(0), box(1), box(35)], classes, "unique"))
+        # Two different raw species IDs both map to Fish: ambiguous, rejected.
+        self.assertIsNone(select_boxes([box(0), box(1), box(29), box(35)], classes, "unique"))
+        self.assertIsNone(select_boxes([box(0), box(2)], classes, "unique"))
+
+    def test_yolo_best_selection_keeps_top_box_inside_fish(self) -> None:
+        def box(class_id, conf, xyxy):
+            return types.SimpleNamespace(
+                cls=types.SimpleNamespace(item=lambda: class_id),
+                conf=types.SimpleNamespace(item=lambda: conf),
+                xyxy=[types.SimpleNamespace(tolist=lambda: list(xyxy))],
+            )
+        classes = ["Head", "Tail", "Fish"]
+        fish = box(2, 0.9, (0, 0, 100, 40))
+        head, weak_head = box(0, 0.8, (0, 0, 20, 20)), box(0, 0.3, (40, 0, 60, 20))
+        tail = box(1, 0.7, (80, 0, 100, 20))
+        chosen = select_boxes([weak_head, head, tail, fish], classes, "best")
+        self.assertIs(chosen["Head"], head)
+        self.assertIs(chosen["Tail"], tail)
+        # A landmark far outside the selected fish box is not accepted.
+        stray_tail = box(1, 0.95, (300, 300, 320, 320))
+        self.assertIsNone(select_boxes([head, stray_tail, fish], classes, "best"))
+        self.assertIsNone(select_boxes([head, fish], classes, "best"))
+
+    def test_yolo_passes_configured_image_size(self) -> None:
+        model = YoloModel.__new__(YoloModel)
+        model.model_initialized = True
+        model.confidence = 0.2
+        model.imgsz = 512
+        model.model = mock.Mock()
+        model.model.predict.return_value = []
+        model.predict(Path("image.png"))
+        model.model.predict.assert_called_once_with(
+            "image.png", conf=0.2, verbose=False, imgsz=512
+        )
+
+    def test_yolo_uses_configured_confidence(self) -> None:
+        model = YoloModel.__new__(YoloModel)
+        model.model_initialized = True
+        model.confidence = 0.5
+        model.model = mock.Mock()
+        model.model.predict.return_value = []
+        self.assertEqual(model.predict(Path("image.png")), (None, None, None))
+        model.model.predict.assert_called_once_with(
+            "image.png", conf=0.5, verbose=False
+        )
+
     def test_yolo_returns_matching_cached_json(self) -> None:
         step = YoloStep.__new__(YoloStep)
         with tempfile.TemporaryDirectory() as tmp:
@@ -252,7 +307,7 @@ class CachedReadTests(unittest.TestCase):
             checkpoint.write_bytes(b"checkpoint")
             step.config = types.SimpleNamespace(
                 model_path=types.SimpleNamespace(yolo=checkpoint),
-                params=types.SimpleNamespace(yolo_classes=["Fish"]),
+                params=types.SimpleNamespace(yolo_classes=["Fish"], yolo_confidence=0.5),
             )
             step.cache_variant = "initial"
             out = root / "a.json"
@@ -264,7 +319,7 @@ class CachedReadTests(unittest.TestCase):
                     "step": "yolo",
                     "version": 1,
                     "variant": "initial",
-                    "confidence": step.CONFIDENCE,
+                    "confidence": step.config.params.yolo_confidence,
                     "classes": ["Fish"],
                 },
             )

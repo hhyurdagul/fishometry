@@ -7,7 +7,7 @@
     "depth": [true, false]
   },
   "model_path": {
-    "yolo": "checkpoints/yolov11m-all_fish_model.pt",
+    "yolo": "checkpoints/yolo11n-outdoor-3class-20260924.pt",
     "sam": "checkpoints/sam.pth",
     "depth": "checkpoints/depth_anything_v2_vitl.pth"
   },
@@ -15,6 +15,9 @@
     "train_ratio": 0.7,
     "val_ratio": 0.15,
     "test_ratio": 0.15,
-    "yolo_classes": ["Head", "Tail", "Fish"]
+    "yolo_classes": ["Head", "Tail", "Fish"],
+    "yolo_confidence": 0.2,
+    "yolo_imgsz": 512,
+    "yolo_selection": "best"
   }
 }

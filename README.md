@@ -1,169 +1,164 @@
-# Fishometry
+# Dataset Configurations
 
-Fishometry is a master's thesis project for estimating fish length from a single image without requiring a ruler or another physical reference object in the frame. The project compares controlled laboratory photographs with heterogeneous outdoor photographs and evaluates how geometry, relative depth, segmentation, scene context, species information, and image features affect length prediction.
+JSON files in this directory define dataset identity, preprocessing model locations, split ratios, detector labels, and the experiment combinations used during training. Commands select a config by filename stem; the config's dataset name then determines all data locations.
 
-The repository contains four manually sequenced pipelines:
+Run config-driven commands from the repository root because paths are relative to the current working directory.
 
-1. Create stable train, validation, and test assignments.
-2. Derive the zoom-augmented controlled dataset from the persisted controlled split.
-3. Preprocess images into detections, image artifacts, and engineered features.
-4. Train an experiment matrix and inspect its predictions in Streamlit.
+## Current Configs
 
-There is no all-in-one orchestrator. Each stage consumes artifacts produced by the preceding stage.
+| Config | Dataset | Rotation | Fish types | Feature sets | Depth variants |
+| --- | --- | --- | --- | --- | --- |
+| `data-inside.json` | Controlled laboratory data | Enabled | No | `eye`, `coords` | With and without depth |
+| `data-inside-zoom.json` | Zoom-derived controlled data | Enabled | No | `eye`, `coords` | With and without depth |
+| `data-outside.json` | Multi-species outdoor data | Enabled | Yes | `coords`, `features` | With and without depth |
 
-## Documentation
+`data-inside-zoom.json` is predefined and remains the source of truth for preprocessing and training the generated zoom dataset. The augmentation workflow creates its data artifacts but does not generate or overwrite this config.
 
-- [Pipeline knowledge base](KNOWLEDGE_BASE.md): implementation-independent explanation of the research workflow, outputs, experiments, and interpretation
-- [Configuration reference](configs/README.md): config schema, current datasets, paths, validation, and experiment switches
-- [Source overview](src/README.md): package boundaries and handoff contracts
-- [Create data](src/create_data/README.md): split creation and zoom dataset workflow
-- [Create data steps](src/create_data/steps/README.md): split and augmentation mechanics
-- [Preprocessing](src/preprocessing/README.md): end-to-end computer-vision and feature pipeline
-- [Preprocessing steps](src/preprocessing/steps/README.md): behavior and artifacts of every preprocessing stage
-- [Training](src/training/README.md): experiment orchestration and prediction-table contract
-- [Training models](src/training/models/README.md): model architectures, features, fitting, and checkpoints
-- [Visualization](src/visualization/README.md): Streamlit application requirements and operation
-- [Visualization views](src/visualization/views/README.md): filters, metrics, charts, and image views
+## Config Shape
 
-The READMEs under `third_party/` belong to the vendored project and are not Fishometry documentation.
-
-## Dataset Variants
-
-| Dataset | Purpose | Raw metadata | Split behavior | Training additions |
-| --- | --- | --- | --- | --- |
-| `data-inside` | Controlled laboratory images | `name`, `length` | One global split | Eye and coordinate feature experiments |
-| `data-inside-zoom` | Original, zoom-in, and zoom-out versions of controlled images | Source metadata plus inherited split flags | Each three-image family keeps the persisted `data-inside` assignment | Same experiment families as controlled data |
-| `data-outside` | Outdoor images from multiple fish types | `fish_type`, `name`, `length` | Split independently within each fish type | Global, per-fish-type, context-rich, and embedding experiments |
-
-Dataset and runtime artifacts are intentionally ignored by Git. Do not assume another checkout contains the local images, generated tables, caches, or checkpoints present on a development machine.
-
-## Prerequisites
-
-- Python 3.10 or newer
-- [`uv`](https://docs.astral.sh/uv/) for dependency management
-- The Depth Anything V2 Git submodule
-- YOLO, Segment Anything, and Depth Anything checkpoints referenced by the selected config
-- A CUDA-capable GPU is strongly recommended for preprocessing and neural training, although CPU execution is supported by most stages
-- `.env.json` with a `GEMINI_API_KEY` entry when a configured `features` experiment requires original-image context
-
-From the repository root:
-
-```bash
-git submodule update --init --recursive
-uv sync
+```json
+{
+  "dataset": {
+    "name": "data-inside",
+    "rotate": true,
+    "fish_type_available": false,
+    "feature_sets": ["eye", "coords"],
+    "depth": [true, false]
+  },
+  "model_path": {
+    "yolo": "checkpoints/yolo11m-inside_fish_model.pt",
+    "sam": "checkpoints/sam.pth",
+    "depth": "checkpoints/depth_anything_v2_vitl.pth"
+  },
+  "params": {
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "yolo_classes": ["Head", "Tail", "Eye", "Fish"],
+    "yolo_confidence": 0.5
+  }
+}
 ```
 
-Place model checkpoints at the locations declared in the dataset configs. Configuration loading verifies the dataset folder, raw image folder, and raw metadata table, but individual preprocessing stages validate their own model files.
+## `dataset`
 
-## Required Dataset Layout
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `name` | Required | Folder name under `data/` and namespace for generated artifacts and training checkpoints |
+| `rotate` | `true` | Whether fish are aligned horizontally before the second detection and all downstream image stages |
+| `fish_type_available` | `false` | Enables per-type splitting, fish-type dummy features, grouped baseline predictions, and per-type experiment variants |
+| `feature_sets` | `["coords", "scaled"]` | Feature-family names iterated by every configured training model; current configs override the unused `scaled` default |
+| `depth` | `[true, false]` | Whether training runs each feature family with and without the five depth columns |
 
-Before loading a source dataset config, create:
+`feature_sets` and `depth` configure experiments only. They do not turn preprocessing stages on or off.
+
+Supported feature-family names in the current training implementation are:
+
+- `eye`: eye width and height plus fish bounding-box width and height.
+- `coords`: relative fish width, relative fish height, relative box area, fish aspect ratio, and square-root box area.
+- `features`: coordinate features plus segmentation geometry, original-image scene context, and encoded context categories.
+
+Fish-type dummy columns are automatically included in all feature families when fish types are available.
+
+## `model_path`
+
+| Field | Consumer | Expected model |
+| --- | --- | --- |
+| `yolo` | Both detection passes | A detector whose class IDs match `yolo_classes` order |
+| `sam` | Segmentation | Segment Anything ViT-L checkpoint |
+| `depth` | Relative-depth estimation | Depth Anything V2 ViT-L checkpoint |
+
+Config loading does not verify these files. The relevant preprocessing step raises an error when its checkpoint is missing or incompatible.
+
+## `params`
+
+| Field | Default | Runtime behavior |
+| --- | --- | --- |
+| `train_ratio` | `0.7` | Training count is `floor(group_size * train_ratio)` |
+| `val_ratio` | `0.15` | Validation count is `round(group_size * val_ratio)` |
+| `test_ratio` | `0.15` | Validated as part of the ratio total, but not used directly; test receives every row remaining after train and validation |
+| `yolo_classes` | `Head`, `Tail`, `Fish` | Ordered detector label mapping; the final entry is the default label for any class ID not mapped earlier |
+| `yolo_confidence` | `0.8` | Detector inference cutoff, also recorded in the YOLO cache signature; both indoor configs use `0.5` to recover usable images |
+| `yolo_imgsz` | unset (640) | Detector inference size in pixels; must be a multiple of 32; recorded in the YOLO cache signature when set |
+| `yolo_selection` | `unique` | `unique` rejects repeated labels; `best` keeps the top box per label and requires the landmarks to lie inside the fish box |
+
+Every ratio must be strictly greater than zero and strictly less than one. Their sum may not exceed one. Because test receives the remainder, a sum below one makes the effective test share larger than `test_ratio`.
+The detector confidence must be strictly between zero and one.
+
+The current `data-outside` configuration uses one detector and no fallback: the three-class YOLO11n model (`Head`, `Tail`, `Fish`) at 512 px, confidence 0.20, with `best` selection. These settings were chosen on the validation split only. The selection, held-out results and a reason for every image that still fails are in `reports/detector-single-model-audit-2026-09-24/REPORT.md`; training provenance is in `reports/detector-retrain-2026-09-24/REPORT.md`.
+
+When fish types are enabled, floor/round/remainder calculations are performed independently for every type. Small groups can consequently have an empty validation or test partition.
+
+## Detector Class Ordering
+
+Detector class IDs are interpreted positionally. With:
+
+```json
+["Head", "Tail", "Eye", "Fish"]
+```
+
+class IDs 0, 1, and 2 map to `Head`, `Tail`, and `Eye`; all other IDs map to the final `Fish` label. The configured order must match the checkpoint's training labels. The preprocessing pipeline expects one usable detection for each required body part and rejects a prediction containing duplicate raw class IDs.
+
+## Dataset Validation
+
+Loading any config requires these paths to exist already:
 
 ```text
-data/<dataset>/
+data/<dataset-name>/
 |-- raw/
-|   `-- <image files>
 `-- raw.csv
 ```
 
-`raw.csv` requires one row per image:
+The raw metadata table must contain:
 
-- `name`: image filename relative to `raw/`; names are expected to be unique.
-- `length`: numeric ground-truth fish length, using one consistent unit within the dataset.
-- `fish_type`: required only when the config enables fish-type-aware behavior.
+- `name`: unique image filename.
+- `length`: numeric target value.
+- `fish_type`: required when `fish_type_available` is `true`.
 
-Required metadata values are validated before splitting. Names must be safe, unique relative paths; every referenced image must exist, decode successfully, and have unique file content.
+Config validation checks only the dataset directory, raw directory, and raw table. It does not validate table columns, image correspondence, unique names, split files, processed files, checkpoints, or API credentials.
 
-## End-to-End Workflow
+The helper that lists valid configs silently excludes a config when parsing or dataset validation fails. Direct selection reports the validation error.
 
-Run commands from the repository root because configs and data paths are relative to it.
+Augmentation is the one bootstrap exception: it validates the predefined zoom config without requiring the target dataset to exist, creates the target raw artifacts, and leaves the config unchanged. Ordinary preprocessing and training config loading then uses the normal dataset-presence validation.
 
-### 1. Create source splits
+## Derived Paths
 
-```bash
-uv run python -m src.create_data.run --dataset-name data-inside
-uv run python -m src.create_data.run --dataset-name data-outside
-```
+For dataset name `<dataset>`, the shared config layer resolves:
 
-Each command replaces that dataset's `split.csv`. Re-running split creation can change assignments, so treat the persisted split as an experiment input once downstream work begins.
+| Purpose | Path |
+| --- | --- |
+| Raw images | `data/<dataset>/raw/` |
+| Raw metadata | `data/<dataset>/raw.csv` |
+| Split metadata | `data/<dataset>/split.csv` |
+| Processed artifacts | `data/<dataset>/processed/` |
+| Processed feature table | `data/<dataset>/processed.csv` |
+| Dataset root | `data/<dataset>/` |
 
-### 2. Create the zoom-derived dataset
+Training adds `checkpoints/<dataset>/` and `data/<dataset>/predictions.csv` outside the computed config properties.
 
-```bash
-uv run python -m src.create_data.run --dataset-name data-inside --augment
-```
+## Rotation and Original-Image Context
 
-Augmentation requires `data/data-inside/split.csv` and the predefined `data-inside-zoom` config. It does not split the controlled data again. Every readable source image yields an original copy, one zoom-in image, and one zoom-out image with identical labels and split flags.
+With rotation enabled:
 
-### 3. Preprocess each dataset
+1. Initial detection runs on the raw image.
+2. The fish is rotated using head and tail centers.
+3. Detection runs again on the rotated image.
+4. Depth, segmentation, blackout creation, and geometric features use the rotated image.
+5. Previously cached scene context from the original image is still joined when present; new remote context requests are skipped.
 
-```bash
-uv run python -m src.preprocessing.run --dataset-name data-inside
-uv run python -m src.preprocessing.run --dataset-name data-inside-zoom
-uv run python -m src.preprocessing.run --dataset-name data-outside
-```
+This cache behavior is intentional: scene placement, lighting, surrounding objects, and fishnet presence describe the original photograph even when geometry is measured after rotation.
 
-Preprocessing runs only the expensive optional stages required by the experiment contract: depth is skipped when every configured depth flag is false, and original-image context is skipped when `features` is absent. Detection, rotation, segmentation, blackout generation, and final feature engineering remain required by the core model matrix.
+With rotation disabled, both detector passes use the raw-image cache, downstream image stages use raw images, and uncached original-image context may be requested.
 
-### 4. Train experiments
+## Adding a Dataset Config
 
-```bash
-uv run python -m src.training.run --dataset-name data-inside
-uv run python -m src.training.run --dataset-name data-inside-zoom
-uv run python -m src.training.run --dataset-name data-outside
-```
+1. Create the dataset directory, raw image folder, and raw metadata table first.
+2. Copy the closest existing JSON config.
+3. Set a unique dataset name that matches the folder.
+4. Match detector labels to the checkpoint class order.
+5. Choose only feature families whose preprocessing columns will exist.
+6. Decide whether fish-type-aware splitting and per-type training are valid for the metadata.
+7. Confirm the three ratios and checkpoint locations.
+8. Run split creation before preprocessing, then train only after `processed.csv` is complete.
 
-Training writes checkpoints, predictions, metrics, and a content manifest into an immutable run directory. Canonical predictions and reports, followed by `checkpoints/<dataset>/current.json`, are replaced only after the full matrix succeeds.
-
-### 5. Explore results
-
-```bash
-uv run python -m streamlit run src/visualization/app.py
-```
-
-The app defaults to metrics over all available splits. Select `test` explicitly when reporting held-out performance.
-
-## Artifact Flow
-
-Each dataset is stored under `data/<dataset>/`.
-
-| Artifact | Producer | Contents or purpose |
-| --- | --- | --- |
-| `raw/` | Dataset preparation or augmentation | Original input images |
-| `raw.csv` | Dataset preparation or augmentation | Ground-truth metadata; augmented metadata also carries inherited split flags |
-| `split.csv` | Create-data pipeline | Metadata plus mutually exclusive `is_train`, `is_val`, and `is_test` flags |
-| `processed/cache/` | Preprocessing | Reusable YOLO and original-image context responses |
-| `processed/rotated/` | Preprocessing | Horizontally aligned fish images when rotation is enabled |
-| `processed/depth/` | Preprocessing | Cached relative-depth arrays |
-| `processed/segment/` | Preprocessing | Cached binary segmentation masks |
-| `processed/blackout/` | Preprocessing | Isolated fish images centered on a 224 by 224 black canvas |
-| `processed.csv` | Preprocessing | Labels, split flags, detections, requested depth/context values, mask geometry, and engineered features |
-| `processed/preprocessing_report.json` | Preprocessing | Per-stage input, output, and dropped-name attrition |
-| `checkpoints/<dataset>/runs/<run-id>/` | Training | Versioned model checkpoints and a content-hashed run manifest |
-| `checkpoints/<dataset>/cache/` | Training | Content-validated image embedding caches |
-| `predictions.csv` | Training | Atomically published identifiers, labels, split flags, and one prediction column per completed experiment |
-
-Processed and prediction row counts can be smaller than split row counts. Detection, missing-image, depth, segmentation, context, or null-feature failures remove records at several handoffs.
-
-## Cache and Rerun Policy
-
-Every reusable preprocessing and embedding artifact has a sidecar or companion manifest covering ordered image identities and content hashes plus relevant checkpoint, parameter, prompt, model-revision, and feature-schema values. A mismatch recomputes the artifact instead of silently reusing it.
-
-Within one process, a bounded digest cache reuses SHA256 values while the resolved
-file's device, inode, size, and nanosecond modification/change times are unchanged.
-This avoids rereading large model checkpoints for every image. Each new process
-hashes inputs again; existing artifact manifests and cached results stay compatible.
-Cached depth arrays and masks still need to be read to extract their features.
-
-There is no force or clean mode. Orphaned artifacts from older inputs are reported or left in place rather than pruned automatically; immutable training run directories preserve complete historical fits. Keep the persisted split stable when comparing experiments.
-
-## Result Interpretation
-
-- Training rows fit model parameters.
-- Validation rows guide selected tree and neural models.
-- Test rows are held out from fitting and model selection.
-- Predictions are generated for all surviving rows, which lets the app display any split.
-- Training writes MAE, MAPE, RMSE, and R² for train, validation, and test; the visualization layer recalculates metrics for interactive subsets.
-- Outdoor results can be compared globally, by fish type, and across global versus per-type estimators.
-
-See [the knowledge base](KNOWLEDGE_BASE.md) for the research rationale and a code-independent description of every stage.
+Do not point two config files at the same dataset directory unless overwriting the same split, processed table, predictions, and checkpoints is intentional.

@@ -19,12 +19,18 @@ YOLO, depth, and SAM release their loaded models when their respective stage fin
 
 - The configured checkpoint must exist when the step is constructed.
 - The model is loaded lazily on the first uncached prediction.
-- Inference uses a confidence threshold of `0.8`.
+- Inference uses `params.yolo_confidence` from the dataset config (default `0.8`; both indoor configs use `0.5`; outdoor uses `0.2`).
+- `params.yolo_imgsz` sets the inference size; unset keeps the Ultralytics default of 640 px. The outdoor detector was trained at 512 px and runs at 512.
 - CPU or GPU selection is delegated to the detector library.
 
 ### Accepted prediction
 
-A prediction is discarded when it contains no boxes or contains more than one box with the same raw class ID. Configured labels are positional: all class IDs except the final fallback are mapped by list position, and any remaining ID receives the final label.
+Configured labels are positional: every class ID below the last list position takes that label, and any other ID receives the final label (the whole fish). A prediction is discarded when it has no boxes or lacks any configured label. Duplicates are handled by `params.yolo_selection`:
+
+- `unique` (default, both indoor configs): a label detected more than once rejects the image. Uniqueness is checked after label mapping, so two different species IDs that both map to `Fish` are also rejected.
+- `best` (outdoor): the highest-confidence box per label is kept, and the image is rejected unless every landmark box has at least half of its area inside the selected fish box. This keeps a single fish whose tail, for example, also produced a weaker second box, while refusing landmarks that belong to a different object.
+
+There is no fallback detector.
 
 For every accepted box, the step stores:
 
@@ -40,7 +46,7 @@ The table is joined by image name and then all null rows are dropped. This means
 - Final rotated pass: reads rotated images and writes `processed/cache/yolo_rotated/<name>.json`.
 - With rotation disabled, both passes use the initial raw-image cache.
 
-Cached JSON is accepted only when its sidecar manifest matches the image hash, checkpoint hash, class order, confidence, pass variant, and step version.
+Cached JSON is accepted only when its sidecar manifest matches the image hash, checkpoint hash, class order, confidence, pass variant, and step version. A non-default image size or selection rule is also part of the signature.
 
 ## `rotate.py`: Horizontal Alignment
 

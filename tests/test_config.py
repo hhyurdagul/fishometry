@@ -58,6 +58,22 @@ class ParamConfigTests(unittest.TestCase):
             params.train_ratio + params.val_ratio + params.test_ratio, 1.0
         )
 
+    def test_yolo_confidence_range(self) -> None:
+        self.assertEqual(ParamConfig().yolo_confidence, 0.8)
+        self.assertEqual(ParamConfig(yolo_confidence=0.5).yolo_confidence, 0.5)
+        with self.assertRaisesRegex(ValidationError, "between 0.0 and 1.0"):
+            ParamConfig(yolo_confidence=0.0)
+
+    def test_yolo_imgsz_and_selection(self) -> None:
+        params = ParamConfig()
+        self.assertIsNone(params.yolo_imgsz)
+        self.assertEqual(params.yolo_selection, "unique")
+        self.assertEqual(ParamConfig(yolo_imgsz=512).yolo_imgsz, 512)
+        with self.assertRaisesRegex(ValidationError, "multiple of 32"):
+            ParamConfig(yolo_imgsz=500)
+        with self.assertRaises(ValidationError):
+            ParamConfig(yolo_selection="fallback")
+
 
 class ConfigOnDiskTests(unittest.TestCase):
     def setUp(self) -> None:
